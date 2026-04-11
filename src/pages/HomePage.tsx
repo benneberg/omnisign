@@ -2,7 +2,7 @@ import React from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Monitor, CheckCircle2, ShieldAlert, Zap, Activity, Clock, Server, ShieldCheck, Database } from 'lucide-react';
+import { Monitor, CheckCircle2, ShieldAlert, Zap, Activity, Clock, Server, ShieldCheck, Database, AlertTriangle } from 'lucide-react';
 import { Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';

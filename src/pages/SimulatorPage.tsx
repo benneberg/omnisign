@@ -7,6 +7,7 @@ import type { PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared
 import { RefreshCw, Key, QrCode, Database, ShieldCheck, AlertTriangle, ShieldAlert, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { Badge } from "@/components/ui/badge";
 const DB_NAME = "ScreenMeshDB";
 const STORE_NAME = "Persistence";
 export function SimulatorPage() {

@@ -48,6 +48,7 @@ export const MOCK_DEVICES: Device[] = [
       diskUsage: 12,
       uptimeSeconds: 3600,
       playbackErrors: [] as string[],
+      escalationLevel: 'none',
       cpuCores: 8,
       memoryLimit: 8192
     }
