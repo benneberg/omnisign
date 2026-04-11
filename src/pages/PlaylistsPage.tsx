@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Layers, Clock, GripVertical, Trash2, Save, ArrowLeft, RefreshCw, ShieldCheck, Code } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -102,6 +103,8 @@ export function PlaylistsPage() {
   const queryClient = useQueryClient();
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
   const { data: playlistsData } = useQuery({
     queryKey: ['playlists'],
     queryFn: () => api<{ items: Playlist[] }>('/v1/playlists'),
@@ -122,10 +125,24 @@ export function PlaylistsPage() {
     },
     onError: (e) => toast.error(e.message)
   });
+
+  const newPlaylistMutation = useMutation({
+    mutationFn: async (name: string) => api<Playlist>('/v1/playlists', {
+      method: 'POST', 
+      body: JSON.stringify({name})
+    }),
+    onSuccess: (data) => { 
+      toast.success('Playlist created'); 
+      queryClient.invalidateQueries({queryKey: ['playlists']});
+      setEditingPlaylist(data); 
+      setNewPlaylistOpen(false); 
+    },
+    onError: (e) => toast.error(e.message || 'Failed')
+  });
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || !editingPlaylist || !active.id || typeof active.id !== 'string') return;
+    if (!over || !editingPlaylist || !editingPlaylist.items || !active.id || typeof active.id !== 'string') return;
     if (active.id !== over.id) {
       const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
       const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);
@@ -201,7 +218,9 @@ export function PlaylistsPage() {
             <h1 className="text-4xl font-bold tracking-tight text-foreground">Content Playlists</h1>
             <p className="text-muted-foreground mt-1 text-lg">Secure manifest design for edge execution nodes.</p>
           </div>
-          <Button className="bg-primary shadow-lg h-12 px-6 rounded-xl font-bold"><Plus className="mr-2 h-5 w-5" /> New Playlist</Button>
+          <Button className="bg-primary shadow-lg h-12 px-6 rounded-xl font-bold" onClick={() => { setNewPlaylistOpen(true); setNewPlaylistName(''); }}>
+            <Plus className="mr-2 h-5 w-5" /> New Playlist
+          </Button>
         </div>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {playlists.map((playlist) => (
@@ -214,8 +233,8 @@ export function PlaylistsPage() {
               </CardHeader>
               <CardContent className="space-y-4 pb-4">
                 <div className="flex gap-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  <div className="flex items-center gap-1.5"><Layers className="h-3 w-3" /> {playlist.items.length} Layers</div>
-                  <div className="flex items-center gap-1.5"><Clock className="h-3 w-3" /> {playlist.items.reduce((a, b) => a + b.durationMs, 0) / 1000}s Total</div>
+                  <div className="flex items-center gap-1.5"><Layers className="h-3 w-3" /> {playlist.items?.length || 0} Layers</div>
+                  <div className="flex items-center gap-1.5"><Clock className="h-3 w-3" /> {(playlist.items || []).reduce((a, b) => a + (b.durationMs || 0), 0) / 1000}s Total</div>
                 </div>
               </CardContent>
               <CardFooter className="bg-muted/30 p-4 border-t">
@@ -226,6 +245,26 @@ export function PlaylistsPage() {
             </Card>
           ))}
         </div>
+
+        <Sheet open={newPlaylistOpen} onOpenChange={setNewPlaylistOpen}>
+          <SheetContent>
+            <SheetTitle>Create New Playlist</SheetTitle>
+            <SheetDescription>Start a new content manifest.</SheetDescription>
+            <Input 
+              className='mt-6' 
+              placeholder="e.g. 'Main Lobby Sequence'" 
+              value={newPlaylistName} 
+              onChange={e=>setNewPlaylistName(e.target.value)} 
+            />
+            <Button 
+              disabled={!newPlaylistName.trim() || newPlaylistMutation.isPending} 
+              onClick={()=>newPlaylistMutation.mutate(newPlaylistName)}
+              className='w-full mt-6'
+            >
+              Create & Edit
+            </Button>
+          </SheetContent>
+        </Sheet>
       </div>
     </AppLayout>
   );

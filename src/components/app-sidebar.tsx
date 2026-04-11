@@ -54,10 +54,8 @@ export function AppSidebar(): JSX.Element {
           <SidebarGroupLabel>Documentation</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <a href="https://github.com/omnisign/docs" target="_blank" rel="noreferrer">
-                  <FileCode className="size-4" /> <span>API Reference</span>
-                </a>
+              <SidebarMenuButton asChild isActive={location.pathname === '/docs'}>
+                <Link to='/docs'><FileCode className="size-4" /> <span>API Reference</span></Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -65,6 +63,11 @@ export function AppSidebar(): JSX.Element {
                 <Link to="/settings">
                   <BookOpen className="size-4" /> <span>Mesh Guide</span>
                 </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={location.pathname === '/provision'}>
+                <Link to='/provision'><Server className="size-4" /> <span>Provision Guide</span></Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

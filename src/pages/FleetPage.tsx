@@ -6,21 +6,27 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Monitor, RefreshCcw, Plus, ShieldCheck, Layers, Activity, Terminal, ExternalLink, Cpu, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
-import type { Device, Playlist } from '@shared/types';
+import type { Device, Playlist, DeviceInitResponse } from '@shared/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Copy } from 'lucide-react';
 export function FleetPage() {
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewingDevice, setViewingDevice] = useState<Device | null>(null);
   const [pairingCode, setPairingCode] = useState('');
+  const [provisionOpen, setProvisionOpen] = useState(false);
+  const [provisionResult, setProvisionResult] = useState<DeviceInitResponse | null>(null);
+  const [platform, setPlatform] = useState('ScreenMesh-OS');
+  const [appVersion, setAppVersion] = useState('3.1.0-STABLE');
   const alertedAnomalies = useRef<Set<string>>(new Set());
   const { data: devicesData, isLoading, refetch } = useQuery({
     queryKey: ['devices'],
@@ -57,6 +63,20 @@ export function FleetPage() {
     },
     onError: (e) => toast.error(e.message)
   });
+
+  const provisionMutation = useMutation({
+    mutationFn: async ({platform, appVersion}: {platform:string, appVersion:string}) => 
+      api<DeviceInitResponse>('/v1/devices/init', {
+        method:'POST', 
+        body:JSON.stringify({platform, appVersion})
+      }),
+    onSuccess: (data) => { 
+      toast.success(`Provisioned Node ${data.deviceId}`);
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      setProvisionResult(data); 
+    },
+    onError: (e: any) => toast.error(e.message)
+  });
   const devices = useMemo(() => {
     const list = devicesData?.items ?? [];
     if (statusFilter === 'all') return list;
@@ -74,7 +94,7 @@ export function FleetPage() {
             <Button variant="outline" className="h-12 px-6 rounded-xl border-2" onClick={() => refetch()} disabled={isLoading}>
               <RefreshCcw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> Sync Mesh
             </Button>
-            <Button className="h-12 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 shadow-primary">
+            <Button className="h-12 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 shadow-primary" onClick={() => { setProvisionOpen(true); setProvisionResult(null); }}>
               <Plus className="mr-2 h-4 w-4" /> Provision Node
             </Button>
           </div>
@@ -147,6 +167,77 @@ export function FleetPage() {
           </Table>
         </div>
       </div>
+      
+      <Sheet open={provisionOpen || !!provisionResult} onOpenChange={(open) => { if (!open) setProvisionResult(null); setProvisionOpen(open); }} position='right' size='sm'>
+        <SheetContent className='w-[425px]'>
+          <SheetHeader>
+            <SheetTitle>Provision Device Node</SheetTitle>
+            <SheetDescription>Select platform & version</SheetDescription>
+          </SheetHeader>
+          {provisionResult ? (
+            <div className="space-y-6">
+              <div>
+                <div className="text-sm font-mono text-muted-foreground mb-2">Device ID</div>
+                <code className="bg-muted px-3 py-1 rounded-lg text-sm font-mono block">{provisionResult.deviceId}</code>
+              </div>
+              <div className="text-center space-y-4 pt-4 border-t">
+                <div className='text-4xl font-mono font-black tracking-widest'>{provisionResult.pairingCode}</div>
+                <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+                  <Badge variant="secondary">Expires {formatDistanceToNow(provisionResult.pairingExpiresAt)}</Badge>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={async()=>{
+                    await navigator.clipboard.writeText(provisionResult.pairingCode);
+                    toast.success('Copied');
+                  }} variant='outline' size="sm">
+                    <Copy className="h-4 w-4 mr-1" />
+                    Copy Code
+                  </Button>
+                  <Button asChild size="sm">
+                    <a href={`/simulator/${provisionResult.deviceId}`} target='_blank' rel="noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-1" />
+                      Test in Simulator
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className='space-y-4 py-4'>
+              <div>
+                <Label className="text-sm font-medium mb-2 block">Platform</Label>
+                <Select value={platform} onValueChange={setPlatform}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ScreenMesh-OS">ScreenMesh-OS</SelectItem>
+                    <SelectItem value="webOS 6.x">webOS 6.x</SelectItem>
+                    <SelectItem value="webOS 8.x">webOS 8.x</SelectItem>
+                    <SelectItem value="Tizen">Tizen</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm font-medium mb-2 block">App Version</Label>
+                <Input 
+                  value={appVersion} 
+                  onChange={e=>setAppVersion(e.target.value)} 
+                  placeholder='3.1.0-STABLE'
+                />
+              </div>
+              <Button 
+                onClick={()=>provisionMutation.mutate({platform, appVersion})} 
+                className='w-full' 
+                disabled={provisionMutation.isPending}
+              >
+                {provisionMutation.isPending ? 'Provisioning...' : 'Provision Node'}
+              </Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
       <Sheet open={!!viewingDevice} onOpenChange={(o) => !o && setViewingDevice(null)}>
         <SheetContent className="sm:max-w-xl overflow-y-auto">
           {viewingDevice && (
