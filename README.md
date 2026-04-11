@@ -1,145 +1,44 @@
-# Cloudflare Workers Fullstack Chat App
-
-[cloudflarebutton]
-
-A production-ready fullstack chat application built on Cloudflare Workers. Features user management, chat boards with real-time messaging, and a modern React frontend with shadcn/ui. Leverages Durable Objects for efficient state management and indexing across entities.
-
-## ✨ Key Features
-
-- **Serverless Backend**: Hono-based API with Cloudflare Durable Objects for Users and ChatBoards
-- **Entity Management**: Indexed entities for listing users/chats with automatic seeding
-- **Real-time Chat**: Per-chat Durable Object instances storing messages
-- **Modern UI**: React 18, Tailwind CSS, shadcn/ui components
-- **Data Fetching**: Tanstack Query for optimistic updates and caching
-- **Theme Support**: Light/dark mode with persistence
-- **Error Handling**: Global error boundaries and client error reporting
-- **Type-Safe**: Full TypeScript with shared types between frontend/backend
-- **Production Optimized**: SSR assets handling, CORS, logging
-
-## 🛠 Technology Stack
-
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Lucide React, Tanstack Query, React Router, Sonner (toasts), Framer Motion
-- **Backend**: Cloudflare Workers, Hono, Durable Objects (GlobalDurableObject pattern)
-- **State Management**: Durable Object storage with CAS for concurrency, Index entities for listing
-- **Utilities**: Immer, Zod, clsx, tw-merge
-- **Dev Tools**: Bun, Wrangler, ESLint, TypeScript
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- [Bun](https://bun.sh/) installed
-- [Cloudflare Account](https://dash.cloudflare.com/) with Workers enabled
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`bunx wrangler@latest`)
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   bun install
-   ```
-3. Login to Cloudflare:
-   ```bash
-   bunx wrangler login
-   ```
-4. Generate Worker types:
-   ```bash
-   bun run cf-typegen
-   ```
-
-### Development
-
-Start the development server:
-```bash
-bun run dev
+# OmniSign + ScreenMesh 🚀
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Hono](https://img.shields.io/badge/Hono-API-E36002?logo=hono&logoColor=white)](https://hono.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+## Overview
+**OmniSign** is an enterprise-grade digital signage platform consisting of a high-performance cloud Control Plane (CMS) and a resilient, offline-first Execution Layer (**ScreenMesh Player**).
+- **ScreenMesh**: The player engine designed for deterministic playback on SoC hardware (WebOS, Tizen). It features self-healing caches, cryptographic integrity checks, and watchdog recovery protocols.
+- **OmniSign CMS**: A cloud-based orchestration dashboard for fleet management, observability, and signed manifest authoring.
+## 🎯 Key Principles
+- **Always-on**: 4-level fallback logic (Local Cache → Staged Manifest → Default Media → Error Slate).
+- **Offline-first**: Utilizes IndexedDB for media persistence, allowing nodes to run for weeks without connectivity.
+- **Secure**: Every heartbeat and manifest is verified via **Ed25519** signatures and **SHA256** content hashes.
+- **Observable**: Real-time telemetry stream including CPU, Memory, Heap usage, and playback stall detection.
+## 🛠 Features
+### CMS Dashboard
+- **Fleet Monitor**: Granular device health, hardware profiles, and real-time load monitoring.
+- **Secure Pairing**: 6-digit challenge-response workflow with automated public key registration.
+- **Playlist Editor**: Drag-and-drop authoring with integrated SHA256 integrity generation.
+- **Bulk Orchestration**: Cluster-wide manifest distribution and token rotation.
+### ScreenMesh Player Simulator
+- **Execution Engine**: Real-time simulation of hardware watchdog and frame-stall recovery.
+- **Security Overlay**: Visual debug UI showing cryptographic signatures and cache validity.
+- **Self-Healing**: Automatic detection and repair of corrupted local storage objects.
+## 🚀 Quickstart
+1. **Development**: `bun dev` to launch the Hono worker and Vite frontend.
+2. **Fleet Setup**:
+   - Navigate to **Fleet Monitor** in the CMS.
+   - Click "Launch Simulator" to boot a new ScreenMesh node.
+   - Enter the 6-digit code shown on the screen into the CMS pairing dialog.
+3. **Distribution**: Assign a playlist to the "Active" device to see the manifest sync and playback begin.
+## Architecture
+```text
+[ CMS (React/Shadcn) ] <-> [ API (Hono/Durable Objects) ] <-> [ Player (ScreenMesh Engine) ]
+                                     |                                   |
+                                [ R2/CDN ] <----------------------- [ Asset Cache ]
 ```
-
-- Frontend: `http://localhost:3000`
-- API: `http://localhost:3000/api/health`
-- Hot reload enabled for both frontend and Worker
-
-**Available endpoints**:
-- `GET /api/users` - List users
-- `POST /api/users` - Create user `{ "name": "..." }`
-- `GET /api/chats` - List chats
-- `POST /api/chats` - Create chat `{ "title": "..." }`
-- `GET /api/chats/:chatId/messages` - Get messages
-- `POST /api/chats/:chatId/messages` - Send message `{ "userId": "...", "text": "..." }`
-
-### Build & Preview
-
-```bash
-bun run build
-bun run preview
-```
-
-## ☁️ Deployment
-
-1. **Configure Wrangler** (edit `wrangler.jsonc` if needed):
-   ```bash
-   bunx wrangler secret put CLOUDFLARE_API_TOKEN  # Optional
-   ```
-
-2. Deploy to Cloudflare Workers:
-   ```bash
-   bun run deploy
-   ```
-
-3. Your app will be live at `https://<worker>.<subdomain>.workers.dev`
-
-[cloudflarebutton]
-
-**Custom Domain**: Bind via Cloudflare Dashboard > Workers > Your Worker > Triggers > Custom Domain.
-
-## 🧪 Usage Examples
-
-### Frontend API Calls (via `api-client.ts`)
-```ts
-import { api } from '@/lib/api-client'
-
-// List users
-const users = await api('/api/users')
-
-// Create chat
-const chat = await api('/api/chats', {
-  method: 'POST',
-  body: JSON.stringify({ title: 'My Chat' })
-})
-
-// Send message
-const message = await api(`/api/chats/${chatId}/messages`, {
-  method: 'POST',
-  body: JSON.stringify({ userId: 'u1', text: 'Hello!' })
-})
-```
-
-### Extending Entities
-See `worker/entities.ts`:
-1. Extend `IndexedEntity<S>` for new types
-2. Add routes in `worker/user-routes.ts`
-3. Use shared types in `shared/types.ts`
-
-### Custom Routes
-Add to `worker/user-routes.ts` and they auto-load.
-
-## 🤝 Contributing
-
-1. Fork & clone
-2. `bun install`
-3. Create feature branch
-4. `bun run lint`
-5. `bun run dev` & test
-6. PR with clear description
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## 🙌 Support
-
-- [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
-- [Durable Objects Guide](https://developers.cloudflare.com/durable-objects/)
-- [shadcn/ui](https://ui.shadcn.com/)
-
-Built with ❤️ for Cloudflare Workers. Issues? Open a GitHub issue.
+## Tech Stack
+- **Frontend**: React 18, Tanstack Query, Framer Motion, Recharts.
+- **Backend**: Hono, Cloudflare Durable Objects (Atomic Entities).
+- **Security**: WebCrypto API (Ed25519, SHA256).
+- **Storage**: IndexedDB (Client), Durable Objects (Server).
+---
+[PRD_v1.2](shared/types.ts) | [API_SPEC_v1.1](API_SPEC_v1.1.md)
