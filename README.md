@@ -1,48 +1,145 @@
-# OmniSign + ScreenMesh
-### Enterprise-Grade Digital Signage & Fleet Orchestration Platform
-OmniSign is a high-performance, resilient digital signage ecosystem designed for mission-critical displays. It is strictly divided into two layers: the **Control Plane (OmniSign CMS)** for orchestration and the **Execution Layer (ScreenMesh Player)** for deterministic, offline-first media playback.
----
-## 🏗️ High-Level Architecture
-The platform leverages a modern edge-computing stack to ensure low latency and high availability.
-- **Control Plane (OmniSign CMS):** A React + Vite dashboard providing fleet observability, cryptographic device provisioning, and visual playlist authoring.
-- **Execution Layer (ScreenMesh Engine):** A specialized player engine (simulated in-browser) that handles manifest verification, content hashing, and watchdog-monitored playback.
-- **State Layer (Cloudflare Durable Objects):** Uses the `IndexedEntity` pattern to provide isolated, atomic state management for every device and playlist in the fleet.
+# Cloudflare Workers Fullstack Chat App
+
+[cloudflarebutton]
+
+A production-ready fullstack chat application built on Cloudflare Workers. Features user management, chat boards with real-time messaging, and a modern React frontend with shadcn/ui. Leverages Durable Objects for efficient state management and indexing across entities.
+
 ## ✨ Key Features
-- **Resilient Playback:** ScreenMesh features a requestAnimationFrame (RAF) watchdog that detects engine stalls and triggers automatic recovery.
-- **Cryptographic Identity:** Secure device onboarding using Ed25519 challenge-response handshakes.
-- **High-Integrity Manifests:** All playlists are versioned and signed. The player verifies SHA256 content hashes before execution.
-- **Traffic Shaping:** Intelligent polling logic using `X-Next-Sync` headers to prevent "thundering herd" sync spikes across large fleets.
-- **Offline-First:** Multi-tier fallback logic (Live -> Cached -> Emergency) ensuring screens never go black.
-## 🚀 Quickstart
-### Development Setup
-1. **Install Dependencies:**
+
+- **Serverless Backend**: Hono-based API with Cloudflare Durable Objects for Users and ChatBoards
+- **Entity Management**: Indexed entities for listing users/chats with automatic seeding
+- **Real-time Chat**: Per-chat Durable Object instances storing messages
+- **Modern UI**: React 18, Tailwind CSS, shadcn/ui components
+- **Data Fetching**: Tanstack Query for optimistic updates and caching
+- **Theme Support**: Light/dark mode with persistence
+- **Error Handling**: Global error boundaries and client error reporting
+- **Type-Safe**: Full TypeScript with shared types between frontend/backend
+- **Production Optimized**: SSR assets handling, CORS, logging
+
+## 🛠 Technology Stack
+
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Lucide React, Tanstack Query, React Router, Sonner (toasts), Framer Motion
+- **Backend**: Cloudflare Workers, Hono, Durable Objects (GlobalDurableObject pattern)
+- **State Management**: Durable Object storage with CAS for concurrency, Index entities for listing
+- **Utilities**: Immer, Zod, clsx, tw-merge
+- **Dev Tools**: Bun, Wrangler, ESLint, TypeScript
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) installed
+- [Cloudflare Account](https://dash.cloudflare.com/) with Workers enabled
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`bunx wrangler@latest`)
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies:
    ```bash
    bun install
    ```
-2. **Start Local Environment:**
+3. Login to Cloudflare:
    ```bash
-   bun run dev
+   bunx wrangler login
    ```
-3. **Access CMS:** Open `http://localhost:3000` to access the dashboard.
-4. **Launch Simulator:** Navigate to `Fleet Monitor` and open a device simulator link.
-### Deployment
-The project is optimized for Cloudflare Workers and Assets:
+4. Generate Worker types:
+   ```bash
+   bun run cf-typegen
+   ```
+
+### Development
+
+Start the development server:
 ```bash
-bun run deploy
+bun run dev
 ```
-## 📋 PRD Alignment Matrix
-| Feature | Implementation Status | View / Component |
-| :--- | :--- | :--- |
-| Fleet Health Monitoring | ✅ Completed | `HomePage.tsx` (Dashboard) |
-| Device Registry & Filters | ✅ Completed | `FleetPage.tsx` |
-| Cryptographic Pairing | ✅ Completed | `ProvisionPage.tsx` / `SimulatorPage.tsx` |
-| Visual Playlist Editor | ✅ Completed | `PlaylistsPage.tsx` |
-| Technical Debug Overlay | ✅ Completed | `SimulatorPage.tsx` |
-| API Documentation | ✅ Completed | `DocsPage.tsx` |
-## 🛠️ Tech Stack
-- **Frontend:** React 18, TypeScript, Tailwind CSS, ShadCN UI, Framer Motion, Recharts.
-- **Backend:** Hono (Middleware-based routing), Cloudflare Workers.
-- **Persistence:** Cloudflare Durable Objects (Entity Pattern).
-- **Security:** Web Crypto API (Ed25519, SHA256).
----
-*OmniSign Platform Engineering v1.2*
+
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:3000/api/health`
+- Hot reload enabled for both frontend and Worker
+
+**Available endpoints**:
+- `GET /api/users` - List users
+- `POST /api/users` - Create user `{ "name": "..." }`
+- `GET /api/chats` - List chats
+- `POST /api/chats` - Create chat `{ "title": "..." }`
+- `GET /api/chats/:chatId/messages` - Get messages
+- `POST /api/chats/:chatId/messages` - Send message `{ "userId": "...", "text": "..." }`
+
+### Build & Preview
+
+```bash
+bun run build
+bun run preview
+```
+
+## ☁️ Deployment
+
+1. **Configure Wrangler** (edit `wrangler.jsonc` if needed):
+   ```bash
+   bunx wrangler secret put CLOUDFLARE_API_TOKEN  # Optional
+   ```
+
+2. Deploy to Cloudflare Workers:
+   ```bash
+   bun run deploy
+   ```
+
+3. Your app will be live at `https://<worker>.<subdomain>.workers.dev`
+
+[cloudflarebutton]
+
+**Custom Domain**: Bind via Cloudflare Dashboard > Workers > Your Worker > Triggers > Custom Domain.
+
+## 🧪 Usage Examples
+
+### Frontend API Calls (via `api-client.ts`)
+```ts
+import { api } from '@/lib/api-client'
+
+// List users
+const users = await api('/api/users')
+
+// Create chat
+const chat = await api('/api/chats', {
+  method: 'POST',
+  body: JSON.stringify({ title: 'My Chat' })
+})
+
+// Send message
+const message = await api(`/api/chats/${chatId}/messages`, {
+  method: 'POST',
+  body: JSON.stringify({ userId: 'u1', text: 'Hello!' })
+})
+```
+
+### Extending Entities
+See `worker/entities.ts`:
+1. Extend `IndexedEntity<S>` for new types
+2. Add routes in `worker/user-routes.ts`
+3. Use shared types in `shared/types.ts`
+
+### Custom Routes
+Add to `worker/user-routes.ts` and they auto-load.
+
+## 🤝 Contributing
+
+1. Fork & clone
+2. `bun install`
+3. Create feature branch
+4. `bun run lint`
+5. `bun run dev` & test
+6. PR with clear description
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## 🙌 Support
+
+- [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
+- [Durable Objects Guide](https://developers.cloudflare.com/durable-objects/)
+- [shadcn/ui](https://ui.shadcn.com/)
+
+Built with ❤️ for Cloudflare Workers. Issues? Open a GitHub issue.
