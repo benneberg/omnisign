@@ -4,17 +4,17 @@ import { DeviceEntity, PlaylistEntity } from "./entities";
 import { ok, bad, notFound, isStr } from './core-utils';
 import type { DeviceHeartbeat } from "@shared/types";
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
-  app.get('/v1/devices', async (c) => {
+  app.get('/api/v1/devices', async (c) => {
     await DeviceEntity.ensureSeed(c.env);
     const page = await DeviceEntity.list(c.env, c.req.query('cursor') ?? null, 100);
     return ok(c, page);
   });
-  app.get('/v1/devices/:id', async (c) => {
+  app.get('/api/v1/devices/:id', async (c) => {
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
     return ok(c, await dev.getState());
   });
-  app.post('/v1/devices/init', async (c) => {
+  app.post('/api/v1/devices/init', async (c) => {
     const { platform, appVersion, publicKey } = await c.req.json<{ platform: string, appVersion: string, publicKey?: string }>();
     const id = c.req.query('id') || crypto.randomUUID();
     await DeviceEntity.create(c.env, {
@@ -29,7 +29,7 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const { code, expiresAt, challenge } = await ent.generatePairingCode(publicKey);
     return ok(c, { deviceId: id, pairingCode: code, pairingExpiresAt: expiresAt, challenge });
   });
-  app.post('/v1/devices/:id/pair', async (c) => {
+  app.post('/api/v1/devices/:id/pair', async (c) => {
     const { code, signature } = await c.req.json<{ code: string, signature?: string }>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
@@ -37,7 +37,7 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     if (!success) return bad(c, 'Invalid or expired pairing code');
     return ok(c, await dev.getState());
   });
-  app.post('/v1/devices/:id/heartbeat', async (c) => {
+  app.post('/api/v1/devices/:id/heartbeat', async (c) => {
     const body = await c.req.json<DeviceHeartbeat>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
@@ -51,7 +51,7 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
       return bad(c, (e as Error).message);
     }
   });
-  app.get('/v1/devices/:id/playlist', async (c) => {
+  app.get('/api/v1/devices/:id/playlist', async (c) => {
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
     const state = await dev.getState();
@@ -64,12 +64,12 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     c.header('X-Next-Challenge', state.expectedNonce || '');
     return ok(c, manifest);
   });
-  app.get('/v1/playlists', async (c) => {
+  app.get('/api/v1/playlists', async (c) => {
     await PlaylistEntity.ensureSeed(c.env);
     const page = await PlaylistEntity.list(c.env, null, 100);
     return ok(c, page);
   });
-  app.post('/v1/playlists/:id/publish', async (c) => {
+  app.post('/api/v1/playlists/:id/publish', async (c) => {
     const { items } = await c.req.json<{ items: any[] }>();
     const pl = new PlaylistEntity(c.env, c.req.param('id'));
     if (!await pl.exists()) return notFound(c);

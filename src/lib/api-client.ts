@@ -21,11 +21,11 @@ export function getNonce(deviceId: string): string | null {
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const isSystemPath = path.includes('/api/health') || path.includes('/api/client-errors');
-  const finalPath = isSystemPath ? path : (path.startsWith('/v1/') ? path : path.replace('/api/', '/v1/'));
+  const finalPath = isSystemPath ? path : (path.startsWith('/v1/') ? '/api' + path : path.replace('/api/', '/api/v1/'));
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
-  const deviceMatch = finalPath.match(/\/v1\/devices\/([^/?#\s]+)/);
-  const isRefreshEndpoint = finalPath.includes('/token/refresh');
+  const deviceMatch = finalPath.match(/\/api\/v1\/devices\/([^/?#\s]+)/);
+  const isRefreshEndpoint = finalPath.includes('/token/refresh') || path.includes('/token/refresh');
   if (deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
     const deviceId = deviceMatch[1];
     const token = getAuth(deviceId);
@@ -44,7 +44,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401 && deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
     const deviceId = deviceMatch[1];
     try {
-      const refreshRes = await fetch(`/v1/devices/${deviceId}/token/refresh`, { method: 'POST' });
+      const refreshRes = await fetch(`/api/v1/devices/${deviceId}/token/refresh`, { method: 'POST' });
       if (refreshRes.ok) {
         const refreshData = await refreshRes.json() as ApiResponse<{accessToken: string}>;
         if (refreshData.success && refreshData.data) {
