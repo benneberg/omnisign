@@ -3,7 +3,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
 }
-export type DeviceStatus = 'active' | 'offline' | 'pairing' | 'new';
+export type DeviceStatus = 'active' | 'offline' | 'pairing' | 'new' | 'emergency_mode';
 export interface AuditLog {
   id: string;
   timestamp: number;
@@ -23,11 +23,13 @@ export interface Device {
   pairingCode?: string;
   pairingExpiresAt: number;
   publicKey?: string;
-  challenge?: string; // Cryptographic nonce for pairing
+  challenge?: string; // Initial setup nonce
+  expectedNonce?: string; // Rotating security nonce for heartbeat
+  nextSyncInterval?: number; // Traffic shaping jitter in ms
   accessToken?: string;
   refreshToken?: string;
   logs: AuditLog[];
-  otaManifest?: Manifest; // Staged OTA firmware update
+  otaManifest?: Manifest;
   metricsHistory: {
     cpu: number[];
     mem: number[];
@@ -39,6 +41,7 @@ export interface Device {
     diskUsage: number;
     uptimeSeconds: number;
     playbackErrors: string[];
+    escalationLevel: 'none' | 'watchdog_recovery' | 'cache_fallback' | 'emergency';
     otaVersion?: string;
     otaStatus?: 'idle' | 'downloading' | 'verifying' | 'applying';
     cpuCores?: number;
@@ -52,7 +55,7 @@ export interface PlaylistItem {
   type: PlaylistItemType;
   url: string;
   htmlContent?: string;
-  integrity: string; // Real SHA256 hash
+  integrity: string; 
   durationMs: number;
   transition?: TransitionType;
 }
@@ -65,10 +68,12 @@ export interface Playlist {
 }
 export interface Manifest {
   playlist: Playlist;
-  signature: string; // Ed25519 signature of the playlist JSON
-  signerPublicKey: string; // Root or Org public key
+  signature: string; 
+  signerPublicKey: string; 
   etag: string;
   issuedAt: number;
+  otaSignature?: string;
+  otaTargetVersion?: string;
 }
 export interface DeviceInitResponse {
   deviceId: string;
@@ -85,8 +90,9 @@ export interface DeviceHeartbeat {
   platform: string;
   appVersion: string;
   telemetry: Device['telemetry'];
-  nonce?: string; // Random string to sign
-  signature?: string; // Ed25519 signature of the heartbeat payload
+  nonce?: string; 
+  challenge?: string; // The signed nonce returned to server
+  signature?: string; 
 }
 export interface User {
   id: string;

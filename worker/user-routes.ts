@@ -2,12 +2,11 @@ import { Hono } from "hono";
 import type { Env } from './core-utils';
 import { DeviceEntity, PlaylistEntity } from "./entities";
 import { ok, bad, notFound, isStr } from './core-utils';
-import type { DeviceHeartbeat, Playlist } from "@shared/types";
+import type { DeviceHeartbeat } from "@shared/types";
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
   app.get('/v1/devices', async (c) => {
     await DeviceEntity.ensureSeed(c.env);
-    const cq = c.req.query('cursor');
-    const page = await DeviceEntity.list(c.env, cq ?? null, 100);
+    const page = await DeviceEntity.list(c.env, c.req.query('cursor') ?? null, 100);
     return ok(c, page);
   });
   app.get('/v1/devices/:id', async (c) => {
@@ -38,26 +37,15 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     if (!success) return bad(c, 'Invalid or expired pairing code');
     return ok(c, await dev.getState());
   });
-  app.post('/v1/devices/:id/token/refresh', async (c) => {
-    const dev = new DeviceEntity(c.env, c.req.param('id'));
-    if (!await dev.exists()) return notFound(c);
-    const tokens = await dev.refreshToken();
-    return ok(c, tokens);
-  });
-  app.post('/v1/devices/bulk/assign', async (c) => {
-    const { deviceIds, playlistId } = await c.req.json<{ deviceIds: string[], playlistId: string }>();
-    if (!Array.isArray(deviceIds) || !isStr(playlistId)) return bad(c, 'Invalid bulk parameters');
-    const pl = new PlaylistEntity(c.env, playlistId);
-    if (!await pl.exists()) return bad(c, 'Target playlist does not exist');
-    const count = await DeviceEntity.bulkAssignPlaylist(c.env, deviceIds, playlistId);
-    return ok(c, { assignedCount: count });
-  });
   app.post('/v1/devices/:id/heartbeat', async (c) => {
     const body = await c.req.json<DeviceHeartbeat>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
     try {
       const state = await dev.heartbeat(body);
+      // Traffic Shaping Headers
+      c.header('X-Next-Challenge', state.expectedNonce || '');
+      c.header('X-Next-Sync', String(state.nextSyncInterval || 60000));
       return ok(c, state);
     } catch (e) {
       return bad(c, (e as Error).message);
@@ -73,6 +61,7 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const manifest = await pl.getSignedManifest();
     c.header('X-Content-Signature', manifest.signature);
     c.header('X-Signer-Key', manifest.signerPublicKey);
+    c.header('X-Next-Challenge', state.expectedNonce || '');
     return ok(c, manifest);
   });
   app.get('/v1/playlists', async (c) => {
@@ -81,7 +70,7 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     return ok(c, page);
   });
   app.post('/v1/playlists/:id/publish', async (c) => {
-    const { items } = await c.req.json<{ items: Playlist['items'] }>();
+    const { items } = await c.req.json<{ items: any[] }>();
     const pl = new PlaylistEntity(c.env, c.req.param('id'));
     if (!await pl.exists()) return notFound(c);
     const updated = await pl.publish(items);

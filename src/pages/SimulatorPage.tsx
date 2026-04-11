@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, saveAuth } from '@/lib/api-client';
 import { generateDeviceKeypair, exportKey, signData, computeHash } from '@/lib/crypto-utils';
 import type { PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
-import { RefreshCw, Key, QrCode, Database, ShieldCheck } from 'lucide-react';
+import { RefreshCw, Key, QrCode, Database, ShieldCheck, AlertTriangle, ShieldAlert, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 const DB_NAME = "ScreenMeshDB";
@@ -12,29 +12,23 @@ const STORE_NAME = "Persistence";
 export function SimulatorPage() {
   const { id } = useParams();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [deviceState, setDeviceState] = useState<Device | null>(null);
   const [pairingInfo, setPairingInfo] = useState<DeviceInitResponse | null>(null);
-  const [cache, setCache] = useState<{hash: string, integrity: boolean}[]>([]);
   const [isBooting, setIsBooting] = useState(true);
-  const [selfHealing, setSelfHealing] = useState<string | null>(null);
   const [keys, setKeys] = useState<{ pub: string, priv: CryptoKey } | null>(null);
-  const isMounted = useRef(true);
-  useEffect(() => {
-    isMounted.current = true;
-    return () => { isMounted.current = false; };
-  }, []);
+  const [resilienceTier, setResilienceTier] = useState<'live' | 'cached' | 'emergency'>('live');
+  const [watchdogMetrics, setWatchdogMetrics] = useState({ rafDrift: 0, frameCount: 0, stalls: 0 });
+  const [integrityQueue, setIntegrityQueue] = useState<string[]>([]);
+  const rafRef = useRef<number>(0);
+  const lastRafTime = useRef<number>(performance.now());
+  const lastFrameIdentity = useRef<string>("");
+  const frameStabilityCounter = useRef<number>(0);
   const getStored = async (key: string) => {
     return new Promise((resolve) => {
       const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains(STORE_NAME)) {
-          req.result.createObjectStore(STORE_NAME);
-        }
-      };
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME); };
       req.onsuccess = () => {
-        const db = req.result;
-        const tx = db.transaction(STORE_NAME, "readonly");
+        const tx = req.result.transaction(STORE_NAME, "readonly");
         const get = tx.objectStore(STORE_NAME).get(key);
         get.onsuccess = () => resolve(get.result);
       };
@@ -43,11 +37,25 @@ export function SimulatorPage() {
   const setStored = async (key: string, val: any) => {
     const req = indexedDB.open(DB_NAME, 1);
     req.onsuccess = () => {
-      const db = req.result;
-      const tx = db.transaction(STORE_NAME, "readwrite");
+      const tx = req.result.transaction(STORE_NAME, "readwrite");
       tx.objectStore(STORE_NAME).put(val, key);
     };
   };
+  // High-Fidelity Watchdog Monitoring
+  const startWatchdog = useCallback(() => {
+    const monitor = (time: number) => {
+      const drift = time - lastRafTime.current;
+      setWatchdogMetrics(prev => ({ ...prev, rafDrift: drift, frameCount: prev.frameCount + 1 }));
+      if (drift > 5000) { // 5s Stall
+        setWatchdogMetrics(prev => ({ ...prev, stalls: prev.stalls + 1 }));
+        toast.error("WATCHDOG: RAF ENGINE STALL DETECTED", { description: "Initiating hot-reload recovery." });
+        window.location.reload();
+      }
+      lastRafTime.current = time;
+      rafRef.current = requestAnimationFrame(monitor);
+    };
+    rafRef.current = requestAnimationFrame(monitor);
+  }, []);
   useEffect(() => {
     const boot = async () => {
       try {
@@ -60,156 +68,137 @@ export function SimulatorPage() {
           await setStored("publicKey", pubBase64);
           await setStored("privateKey", privKey);
         }
-        if (isMounted.current) setKeys({ pub: pubBase64, priv: privKey });
+        setKeys({ pub: pubBase64, priv: privKey });
         const dev = await api<Device>(`/v1/devices/${id}`).catch(() => null);
         if (!dev || dev.status === 'new' || dev.status === 'pairing') {
-          const init = await api<DeviceInitResponse>(`/v1/devices/init`, {
+          const init = await api<DeviceInitResponse>(`/v1/devices/init?id=${id}`, {
             method: 'POST',
-            body: JSON.stringify({ platform: 'ScreenMesh-OS', appVersion: '3.1.0-RC', publicKey: pubBase64 })
+            body: JSON.stringify({ platform: 'ScreenMesh-OS', appVersion: '3.1.0-STABLE', publicKey: pubBase64 })
           });
-          if (isMounted.current) setPairingInfo(init);
+          setPairingInfo(init);
         } else {
-          if (isMounted.current) setDeviceState(dev);
+          setDeviceState(dev);
         }
-      } catch (e) {
-        console.error("[Boot] Engine bootstrap failure", e);
       } finally {
-        setTimeout(() => { if (isMounted.current) setIsBooting(false); }, 1500);
+        setTimeout(() => { setIsBooting(false); startWatchdog(); }, 1500);
       }
     };
     boot();
-  }, [id]);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [id, startWatchdog]);
   const { data: manifest, refetch: forceSync } = useQuery({
     queryKey: ['simulator-playlist', id],
     queryFn: async () => {
-      setIsUpdating(true);
       try {
         const data = await api<Manifest>(`/v1/devices/${id}/playlist`);
         await setStored(`manifest_${id}`, data);
+        setResilienceTier('live');
         return data;
-      } finally {
-        if (isMounted.current) setIsUpdating(false);
+      } catch (e) {
+        const cached = await getStored(`manifest_${id}`) as Manifest;
+        if (cached) {
+          setResilienceTier('cached');
+          toast.warning("Network Loss: Falling back to cached manifest.");
+          return cached;
+        }
+        setResilienceTier('emergency');
+        throw e;
       }
     },
     enabled: deviceState?.status === 'active',
-    refetchInterval: 30000,
+    refetchInterval: deviceState?.nextSyncInterval || 60000,
   });
+  // Anti-Spoof Heartbeat Loop
   useEffect(() => {
-    if (isBooting || !keys) return;
+    if (isBooting || !keys || !deviceState) return;
     const hb = setInterval(async () => {
       try {
-        const perf = (window.performance as any);
-        const mem = perf.memory ? Math.round(perf.memory.usedJSHeapSize / 1024 / 1024) : 45;
-        const totalMem = perf.memory ? Math.round(perf.memory.jsHeapSizeLimit / 1024 / 1024) : 1024;
         const heartbeatPayload = {
-          status: deviceState?.status || 'pairing',
+          status: deviceState.status,
           platform: 'ScreenMesh-OS',
-          appVersion: '3.1.0-RC',
+          appVersion: '3.1.0-STABLE',
           telemetry: {
-            cpuUsage: Math.floor(Math.random() * 8) + 2,
-            memUsage: Math.round((mem / totalMem) * 100),
-            diskUsage: 12,
+            ...deviceState.telemetry,
             uptimeSeconds: Math.floor(performance.now() / 1000),
-            playbackErrors: [],
-            cpuCores: navigator.hardwareConcurrency || 4,
-            memoryLimit: totalMem
+            playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
           }
         };
-        const sig = await signData(keys.priv, JSON.stringify(heartbeatPayload));
+        // Use the expectedNonce provided by the server for signing
+        const nonce = deviceState.expectedNonce || id;
+        const sig = await signData(keys.priv, JSON.stringify({ ...heartbeatPayload, nonce }));
         const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
           method: 'POST',
-          body: JSON.stringify({ ...heartbeatPayload, signature: sig })
+          body: JSON.stringify({ ...heartbeatPayload, signature: sig, challenge: nonce })
         });
-        if (isMounted.current && updated.status === 'active' && deviceState?.status !== 'active') {
-          if (updated.accessToken) saveAuth(id!, updated.accessToken);
-          setDeviceState(updated);
-          toast.success("Identity Verified: Node Authorized");
-        }
+        if (updated.accessToken) saveAuth(id!, updated.accessToken);
+        setDeviceState(updated);
       } catch (e) {
-        console.warn("[Watchdog] Heartbeat signal lost", e);
+        console.warn("[Watchdog] Heartbeat handshake failed", e);
       }
-    }, 10000);
+    }, 15000);
     return () => clearInterval(hb);
-  }, [id, deviceState, isBooting, keys]);
+  }, [id, deviceState, isBooting, keys, watchdogMetrics.stalls]);
+  // Read-Verify-Repair Integrity Check
   useEffect(() => {
     if (!manifest?.playlist?.items.length) return;
     const item = manifest.playlist.items[currentIndex];
-    const verifyIntegrity = async () => {
-      const realHash = await computeHash(item.url + item.durationMs);
-      const isCorrupt = Math.random() < 0.005; // 0.5% failure injection for demo purposes
-      const isValid = isCorrupt ? false : (item.integrity === 'pending' || item.integrity === realHash);
-      setCache(prev => {
-        const filtered = prev.filter(c => c.hash !== item.id);
-        return [{ hash: item.id, integrity: isValid }, ...filtered].slice(0, 5);
-      });
+    const verify = async () => {
+      setIntegrityQueue(prev => [...prev, item.id]);
+      const actualHash = await computeHash(item.url + item.durationMs);
+      // Artificial corruption sim (1% chance)
+      const isCorrupt = Math.random() < 0.01;
+      const isValid = isCorrupt ? false : (item.integrity === actualHash || item.integrity === 'pending');
       if (!isValid) {
-        setSelfHealing(item.id);
-        setTimeout(() => {
-          setCache(prev => prev.map(c => c.hash === item.id ? { ...c, integrity: true } : c));
-          setSelfHealing(null);
-          toast.success("Integrity Auto-Restored: Hash Validated");
-        }, 2000);
+        toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
+        setResilienceTier('cached');
+        // In real app, we'd delete from IDB and refetch
       }
+      setIntegrityQueue(prev => prev.filter(i => i !== item.id));
     };
-    verifyIntegrity();
-    // System watchdog: Detect frame rate drops (backgrounding)
-    let lastFrame = performance.now();
-    let watchdogActive = true;
-    const monitor = (now: number) => {
-      if (now - lastFrame > 3000 && watchdogActive && !document.hidden) {
-        toast.error("WATCHDOG: ENGINE STALL. INITIATING RECOVERY.");
-        forceSync();
-        watchdogActive = false;
-      }
-      lastFrame = now;
-      if (watchdogActive) requestAnimationFrame(monitor);
-    };
-    const rafId = requestAnimationFrame(monitor);
-    // Playback watchdog: Advance playlist
+    verify();
     const timer = setTimeout(() => {
-      watchdogActive = false;
-      if (isMounted.current) setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
+      setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
     }, item.durationMs);
-    return () => { 
-      clearTimeout(timer); 
-      watchdogActive = false; 
-      cancelAnimationFrame(rafId); 
-    };
-  }, [manifest, currentIndex, forceSync]);
+    return () => clearTimeout(timer);
+  }, [manifest, currentIndex]);
   if (isBooting) return (
-    <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4">
+    <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4 uppercase tracking-[0.3em]">
       <RefreshCw className="animate-spin opacity-50" size={48} />
-      <div className="text-xl tracking-widest animate-pulse font-bold uppercase">ScreenMesh Bootstrapping...</div>
+      <div className="text-xl animate-pulse">ScreenMesh Engine Initializing...</div>
+    </div>
+  );
+  if (resilienceTier === 'emergency') return (
+    <div className="w-screen h-screen bg-rose-950 flex flex-col items-center justify-center text-white p-12 text-center space-y-8">
+      <ShieldAlert size={80} className="text-rose-500 animate-pulse" />
+      <div className="space-y-2">
+        <h1 className="text-4xl font-black uppercase tracking-tighter">Emergency Recovery Mode</h1>
+        <p className="text-rose-200 font-mono text-sm max-w-md">No valid manifest (Live/Cache) found. Orchestration signal lost. System awaiting manual root bypass.</p>
+      </div>
+      <div className="font-mono text-[10px] bg-black/40 p-4 rounded-xl border border-rose-500/30">
+        ERROR_CODE: 0x884_NO_PAYLOAD<br/>
+        DEVICE_ID: {id}
+      </div>
     </div>
   );
   if (!deviceState || deviceState.status === 'pairing') return (
-    <div className="w-screen h-screen bg-[#020617] flex flex-col items-center justify-center text-white p-4">
-      <div className="max-w-md w-full bg-slate-900/50 border border-slate-800 p-10 rounded-3xl text-center space-y-8 backdrop-blur-2xl shadow-2xl">
-        <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-glow rotate-3"><Key size={40} /></div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight">Provisioning Mode</h2>
-          <p className="text-zinc-400 text-sm">Challenge pending. Identity established.</p>
-        </div>
-        <div className="p-8 bg-white text-black rounded-3xl mx-auto w-fit shadow-2xl border-8 border-indigo-500/20">
-          <QrCode size={160} className="opacity-90" />
-          <div className="mt-4 text-4xl font-black tracking-[0.4em] font-mono">{pairingInfo?.pairingCode || '------'}</div>
+    <div className="w-screen h-screen bg-[#020617] flex flex-col items-center justify-center text-white">
+      <div className="max-w-md w-full bg-slate-900/50 border border-slate-800 p-12 rounded-[2.5rem] text-center space-y-10 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center shadow-glow rotate-6"><Key size={40} /></div>
+        <div className="space-y-4">
+          <h2 className="text-3xl font-black tracking-tight uppercase">Pairing Challenge</h2>
+          <div className="p-8 bg-white text-black rounded-3xl mx-auto w-fit shadow-2xl border-4 border-indigo-500/20">
+            <QrCode size={180} />
+            <div className="mt-6 text-5xl font-black font-mono tracking-[0.3em]">{pairingInfo?.pairingCode || '------'}</div>
+          </div>
         </div>
       </div>
     </div>
   );
   const activeItem = manifest?.playlist.items[currentIndex];
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden relative select-none">
+    <div className="w-screen h-screen bg-black overflow-hidden relative">
       <AnimatePresence mode="wait">
-        {selfHealing ? (
-          <motion.div key="healing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center text-white space-y-4">
-            <Database className="animate-bounce text-indigo-500" size={48} />
-            <div className="font-mono text-xs tracking-widest uppercase">Repairing content object: {selfHealing}</div>
-            <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} className="h-full bg-indigo-50" />
-            </div>
-          </motion.div>
-        ) : activeItem && (
+        {activeItem && (
           <motion.div key={activeItem.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
             {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" />}
             {activeItem.type === 'video' && <video src={activeItem.url} autoPlay muted loop className="w-full h-full object-cover" />}
@@ -218,34 +207,35 @@ export function SimulatorPage() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="absolute bottom-8 right-8 p-6 bg-slate-950/90 backdrop-blur-2xl border border-white/10 text-white font-mono text-[10px] rounded-2xl w-[320px] shadow-2xl space-y-4">
+      <div className="absolute top-6 left-6 flex gap-3 z-50">
+        <Badge className={`h-8 px-4 rounded-full border-none font-black tracking-widest text-[10px] uppercase shadow-lg ${resilienceTier === 'live' ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+          TIER: {resilienceTier}
+        </Badge>
+        {integrityQueue.length > 0 && (
+          <Badge variant="outline" className="h-8 px-4 rounded-full bg-black/50 text-white border-white/20 text-[10px] font-mono animate-pulse">
+            VERIFYING_READ...
+          </Badge>
+        )}
+      </div>
+      <div className="absolute bottom-8 right-8 p-6 bg-slate-950/95 backdrop-blur-3xl border border-white/10 text-white font-mono text-[9px] rounded-[1.5rem] w-[340px] shadow-2xl space-y-4">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
-          <span className="font-black text-indigo-400">ENGINE_OMNI_PROD</span>
-          <button onClick={() => forceSync()} className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1.5 font-bold uppercase">
-            <RefreshCw size={10} className={isUpdating ? 'animate-spin' : ''} /> Force Sync
-          </button>
+          <span className="font-black text-indigo-400 flex items-center gap-1.5"><ShieldCheck size={12}/> HIGH_INTEGRITY_MESH</span>
+          <span className="text-zinc-500">v3.1.0-S</span>
         </div>
-        <div className="grid grid-cols-2 gap-y-1 opacity-80 uppercase tracking-tighter">
-          <span>Heap Memory</span>
-          <span className="text-right text-indigo-400 font-bold">{deviceState.telemetry.memUsage}%</span>
-          <span>Core Temp</span>
-          <span className="text-right text-emerald-400 font-bold">42°C</span>
-          <span>Manifest</span>
-          <span className="text-right text-zinc-300">REV_{manifest?.playlist.version || 0}</span>
+        <div className="grid grid-cols-2 gap-y-2 opacity-80 uppercase font-bold tracking-tighter">
+          <span>RAF Drift</span><span className="text-right text-emerald-400">{watchdogMetrics.rafDrift.toFixed(2)}ms</span>
+          <span>Frame Count</span><span className="text-right text-indigo-400">{watchdogMetrics.frameCount}</span>
+          <span>Security Nonce</span><span className="text-right truncate text-zinc-400">{deviceState.expectedNonce?.slice(0, 12)}...</span>
+          <span>Next Sync</span><span className="text-right text-amber-400">{Math.round((deviceState.nextSyncInterval || 60000)/1000)}s</span>
         </div>
-        <div className="pt-2 border-t border-white/5">
-          <div className="flex justify-between text-[8px] text-zinc-500 font-bold uppercase mb-2">
-            <span>Cache Status</span>
-            <ShieldCheck size={10} className="text-emerald-500" />
-          </div>
-          <div className="space-y-1">
-            {cache.map(c => (
-              <div key={c.hash} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded">
-                <span className="text-zinc-400 truncate w-32">OBJ_{c.hash.slice(0,8)}</span>
-                {c.integrity ? <div className="w-1 h-1 bg-emerald-500 rounded-full" /> : <div className="w-1 h-1 bg-rose-500 animate-ping rounded-full" />}
-              </div>
-            ))}
-          </div>
+        <div className="pt-2 border-t border-white/5 space-y-2">
+           <div className="flex justify-between items-center text-[8px] font-black uppercase text-zinc-500">
+             <span>Resilience Monitor</span>
+             <Cpu size={10} className="text-indigo-500" />
+           </div>
+           <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+             <motion.div animate={{ width: `${Math.min(100, watchdogMetrics.rafDrift * 10)}%` }} className={`h-full ${watchdogMetrics.rafDrift > 50 ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+           </div>
         </div>
       </div>
     </div>

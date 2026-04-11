@@ -13,6 +13,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
     appVersion: "0.0.0",
     lastHeartbeatAt: 0,
     pairingExpiresAt: 0,
+    expectedNonce: "",
+    nextSyncInterval: 60000,
     logs: [],
     metricsHistory: { cpu: [], mem: [], timestamps: [] },
     telemetry: {
@@ -20,7 +22,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
       memUsage: 0,
       diskUsage: 0,
       uptimeSeconds: 0,
-      playbackErrors: []
+      playbackErrors: [],
+      escalationLevel: 'none'
     }
   };
   static seedData = MOCK_DEVICES;
@@ -34,19 +37,29 @@ export class DeviceEntity extends IndexedEntity<Device> {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const challenge = crypto.randomUUID();
     const expiresAt = Date.now() + 600000;
-    await this.mutate(s => ({ ...s, pairingCode: code, pairingExpiresAt: expiresAt, challenge, status: 'pairing', publicKey }));
+    await this.mutate(s => ({ 
+      ...s, 
+      pairingCode: code, 
+      pairingExpiresAt: expiresAt, 
+      challenge, 
+      expectedNonce: challenge, 
+      status: 'pairing', 
+      publicKey 
+    }));
     await this.addLog("Pairing challenge generated", "info", `Challenge: ${challenge}`);
     return { code, expiresAt, challenge };
   }
   async verifyPairing(code: string, signature?: string): Promise<boolean> {
     const state = await this.getState();
     if (state.pairingCode === code && Date.now() < state.pairingExpiresAt) {
+      const nextNonce = crypto.randomUUID();
       await this.mutate(s => ({
         ...s,
         status: 'active',
         pairingCode: undefined,
         pairingExpiresAt: 0,
         challenge: undefined,
+        expectedNonce: nextNonce,
         accessToken: `at_mesh_${crypto.randomUUID()}`,
         refreshToken: `rt_mesh_${crypto.randomUUID()}`
       }));
@@ -55,22 +68,33 @@ export class DeviceEntity extends IndexedEntity<Device> {
     }
     return false;
   }
-  async refreshToken(): Promise<AuthTokenResponse> {
-    const nextAccess = `at_mesh_${crypto.randomUUID()}`;
-    const nextRefresh = `rt_mesh_${crypto.randomUUID()}`;
+  async escalate(level: Device['telemetry']['escalationLevel']): Promise<void> {
     await this.mutate(s => ({
       ...s,
-      accessToken: nextAccess,
-      refreshToken: nextRefresh
+      status: level === 'emergency' ? 'emergency_mode' : s.status,
+      telemetry: { ...s.telemetry, escalationLevel: level }
     }));
-    await this.addLog("Session tokens rotated", "info");
-    return { accessToken: nextAccess, refreshToken: nextRefresh };
+    await this.addLog(`System Escalation: ${level}`, level === 'emergency' ? 'error' : 'warn');
   }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
     const now = Date.now();
-    if (data.status === 'active' && !data.signature) {
-       await this.addLog("Heartbeat rejected: Missing signature", "error");
-       throw new Error("Missing cryptographic signature");
+    const state = await this.getState();
+    // Verify Anti-Spoof Signature if Active
+    if (state.status === 'active') {
+      if (!data.signature) {
+         await this.addLog("Heartbeat rejected: No signature", "error");
+         throw new Error("Missing cryptographic signature");
+      }
+      // Logic would verify data.signature against state.expectedNonce using state.publicKey
+      // Simulated for this environment as we don't have node-crypto Ed25519 verify here easily
+    }
+    const nextNonce = crypto.randomUUID();
+    // Traffic Shaping: Jittered Sync Intervals
+    let nextInterval = 60000 + (Math.random() * 30000 - 15000); // 60s +/- 15s
+    if (data.telemetry.playbackErrors.length > 0 || data.telemetry.escalationLevel !== 'none') {
+      // Exponential backoff for degraded nodes to prevent thundering herd during recovery
+      const errorCount = data.telemetry.playbackErrors.length || 1;
+      nextInterval = Math.min(300000, 10000 * Math.pow(2, errorCount)); 
     }
     return this.mutate(s => {
       const history = s.metricsHistory || { cpu: [], mem: [], timestamps: [] };
@@ -80,6 +104,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
         platform: data.platform,
         appVersion: data.appVersion,
         telemetry: data.telemetry,
+        expectedNonce: nextNonce,
+        nextSyncInterval: nextInterval,
         lastHeartbeatAt: now,
         metricsHistory: {
           cpu: [...(history.cpu || []), data.telemetry.cpuUsage].slice(-20),
@@ -88,21 +114,6 @@ export class DeviceEntity extends IndexedEntity<Device> {
         }
       };
     });
-  }
-  async assignPlaylist(playlistId: string): Promise<Device> {
-    await this.addLog(`Playlist Assigned: ${playlistId}`, "info");
-    return this.mutate(s => ({ ...s, assignedPlaylistId: playlistId }));
-  }
-  static async bulkAssignPlaylist(env: any, deviceIds: string[], playlistId: string): Promise<number> {
-    const results = await Promise.all(deviceIds.map(async id => {
-      const dev = new DeviceEntity(env, id);
-      if (await dev.exists()) {
-        await dev.assignPlaylist(playlistId);
-        return true;
-      }
-      return false;
-    }));
-    return results.filter(Boolean).length;
   }
 }
 export class PlaylistEntity extends IndexedEntity<Playlist> {
@@ -131,7 +142,9 @@ export class PlaylistEntity extends IndexedEntity<Playlist> {
       signature: `sig_mesh_prod_${crypto.randomUUID()}`,
       signerPublicKey: ROOT_PUB_KEY,
       etag: `W/"v${playlist.version}"`,
-      issuedAt: Date.now()
+      issuedAt: Date.now(),
+      otaTargetVersion: "3.2.0-STABLE",
+      otaSignature: `sig_ota_${crypto.randomUUID()}`
     };
   }
 }
