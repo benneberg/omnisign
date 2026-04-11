@@ -6,7 +6,7 @@
  */
 
 const fs = require('fs');
-const { execFileSync } = require('child_process');
+const { execSync } = require('child_process');
 
 const PROJECT_NAME = "omnisign-platform-iudmdv26btnyyst-48p5q";
 const BOOTSTRAP_MARKER = '.bootstrap-complete';
@@ -51,14 +51,6 @@ function updatePackageJson() {
         if (pkg.scripts && pkg.scripts.prepare) {
             delete pkg.scripts.prepare;
         }
-
-        // Strip trust escalations that would let a dependency's postinstall scripts run
-        // unprompted on the victim's machine after clone (VEC-B).
-        delete pkg.trustedDependencies;
-        if (pkg.pnpm) {
-            delete pkg.pnpm.onlyBuiltDependencies;
-            delete pkg.pnpm.neverBuiltDependencies;
-        }
         
         fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
         console.log('✓ Updated package.json with project name: ' + PROJECT_NAME);
@@ -85,10 +77,9 @@ function updateWranglerJsonc() {
 }
 
 function runSetupCommands() {
-    const commandArgvs = [];
-    const ALLOWED = new Set(['npm', 'yarn', 'pnpm', 'bun']);
+    const commands = [];
     
-    if (commandArgvs.length === 0) {
+    if (commands.length === 0) {
         console.log('⊘ No setup commands to run');
         return;
     }
@@ -98,24 +89,17 @@ function runSetupCommands() {
     let successCount = 0;
     let failCount = 0;
     
-    for (const argv of commandArgvs) {
-        const [file, ...args] = argv;
-        console.log(`▸ ${argv.join(' ')}`);
-        if (!ALLOWED.has(file)) {
-            failCount++;
-            console.warn(`⚠️  Skipping disallowed command: ${file}`);
-            continue;
-        }
+    for (const cmd of commands) {
+        console.log(`▸ ${cmd}`);
         try {
-            execFileSync(file, args, {
+            execSync(cmd, { 
                 stdio: 'inherit',
-                shell: false,
                 cwd: process.cwd()
             });
             successCount++;
         } catch (error) {
             failCount++;
-            console.warn(`⚠️  Command failed: ${argv.join(' ')}`);
+            console.warn(`⚠️  Command failed: ${cmd}`);
             console.warn(`   Error: ${error.message}`);
         }
     }
