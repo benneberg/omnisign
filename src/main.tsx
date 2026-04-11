@@ -16,6 +16,9 @@ import { FleetPage } from '@/pages/FleetPage'
 import { PlaylistsPage } from '@/pages/PlaylistsPage'
 import { SimulatorPage } from '@/pages/SimulatorPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { DocsPage } from '@/pages/DocsPage'
+import { ProvisionPage } from '@/pages/ProvisionPage'
+import { NotFoundPage } from '@/pages/NotFoundPage'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
