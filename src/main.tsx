@@ -12,17 +12,39 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 import '@/index.css'
 import { HomePage } from '@/pages/HomePage'
-
-const queryClient = new QueryClient();
-
+import { FleetPage } from '@/pages/FleetPage'
+import { PlaylistsPage } from '@/pages/PlaylistsPage'
+import { SimulatorPage } from '@/pages/SimulatorPage'
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 const router = createBrowserRouter([
   {
     path: "/",
     element: <HomePage />,
     errorElement: <RouteErrorBoundary />,
   },
+  {
+    path: "/fleet",
+    element: <FleetPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "/playlists",
+    element: <PlaylistsPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "/simulator/:id",
+    element: <SimulatorPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
 ]);
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
@@ -32,4 +54,3 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
-   

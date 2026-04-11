@@ -1,6 +1,5 @@
-/* This is a demo sidebar. **COMPULSORY** Edit this file to customize the sidebar OR remove it from appLayout OR don't use appLayout at all */
 import React from "react";
-import { Home, Layers, Compass, Star, Settings, LifeBuoy } from "lucide-react";
+import { LayoutDashboard, Monitor, PlayCircle, Settings, ExternalLink, Terminal } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -8,65 +7,74 @@ import {
   SidebarGroup,
   SidebarHeader,
   SidebarSeparator,
-  SidebarInput,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarMenuAction,
-  SidebarMenuBadge,
 } from "@/components/ui/sidebar";
-
+import { Link, useLocation } from "react-router-dom";
 export function AppSidebar(): JSX.Element {
+  const location = useLocation();
   return (
     <Sidebar>
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1">
-          <div className="h-6 w-6 rounded-md bg-gradient-to-br from-indigo-500 to-purple-500" />
-          <span className="text-sm font-medium">Demo Sidebar</span>
+        <div className="flex items-center gap-3 px-2 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Terminal className="size-5" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold leading-none">OmniSign</span>
+            <span className="text-xs text-muted-foreground mt-1">CMS Control Plane</span>
+          </div>
         </div>
-        <SidebarInput placeholder="Search" />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
+          <SidebarGroupLabel>Fleet Orchestration</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive>
-                <a href="#"><Home /> <span>Home</span></a>
+              <SidebarMenuButton asChild isActive={location.pathname === "/"}>
+                <Link to="/"><LayoutDashboard className="size-4" /> <span>Dashboard</span></Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <a href="#"><Layers /> <span>Projects</span></a>
+              <SidebarMenuButton asChild isActive={location.pathname === "/fleet"}>
+                <Link to="/fleet"><Monitor className="size-4" /> <span>Fleet Monitor</span></Link>
               </SidebarMenuButton>
-              <SidebarMenuAction>
-                <Star className="size-4" />
-              </SidebarMenuAction>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <a href="#"><Compass /> <span>Explore</span></a>
+              <SidebarMenuButton asChild isActive={location.pathname === "/playlists"}>
+                <Link to="/playlists"><PlayCircle className="size-4" /> <span>Playlists</span></Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
-
         <SidebarSeparator />
-
         <SidebarGroup>
-          <SidebarGroupLabel>Quick Links</SidebarGroupLabel>
+          <SidebarGroupLabel>Utilities</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild>
-                <a href="#"><Star /> <span>Starred</span></a>
+                <Link to="/settings"><Settings className="size-4" /> <span>Settings</span></Link>
               </SidebarMenuButton>
-              <SidebarMenuBadge>5</SidebarMenuBadge>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="text-indigo-600 dark:text-indigo-400 font-medium">
+                <a href="/simulator/dev-001" target="_blank">
+                  <ExternalLink className="size-4" /> <span>Launch Simulator</span>
+                </a>
+              </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <div className="px-2 text-xs text-muted-foreground">A simple shadcn sidebar</div>
+        <div className="px-4 py-3">
+          <div className="rounded-lg bg-muted p-3">
+            <p className="text-xs font-medium">v1.2.4-stable</p>
+            <p className="text-[10px] text-muted-foreground">Connected to ScreenMesh Cloud</p>
+          </div>
+        </div>
       </SidebarFooter>
     </Sidebar>
   );

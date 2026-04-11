@@ -3,22 +3,44 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
 }
-
-// Minimal real-world chat example types (shared by frontend and worker)
+export type DeviceStatus = 'active' | 'offline' | 'pairing';
+export interface Device {
+  id: string;
+  orgId: string;
+  name: string;
+  status: DeviceStatus;
+  platform: string;
+  appVersion: string;
+  lastHeartbeatAt: number; // epoch ms
+  assignedPlaylistId?: string;
+  telemetry: {
+    cpuUsage: number;
+    memUsage: number;
+    diskUsage: number;
+    uptimeSeconds: number;
+  };
+}
+export type PlaylistItemType = 'image' | 'video';
+export interface PlaylistItem {
+  id: string;
+  type: PlaylistItemType;
+  url: string;
+  checksum: string;
+  durationMs: number;
+}
+export interface Playlist {
+  id: string;
+  name: string;
+  version: number;
+  items: PlaylistItem[];
+}
+export interface DeviceHeartbeat {
+  status: DeviceStatus;
+  telemetry: Device['telemetry'];
+}
+// Keep existing User/Chat types for compatibility if needed, 
+// though we are shifting focus to OmniSign.
 export interface User {
   id: string;
   name: string;
-}
-
-export interface Chat {
-  id: string;
-  title: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  chatId: string;
-  userId: string;
-  text: string;
-  ts: number; // epoch millis
 }

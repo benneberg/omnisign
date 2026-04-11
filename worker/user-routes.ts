@@ -1,75 +1,59 @@
 import { Hono } from "hono";
 import type { Env } from './core-utils';
-import { UserEntity, ChatBoardEntity } from "./entities";
+import { DeviceEntity, PlaylistEntity } from "./entities";
 import { ok, bad, notFound, isStr } from './core-utils';
-
+import type { DeviceHeartbeat } from "@shared/types";
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
-  app.get('/api/test', (c) => c.json({ success: true, data: { name: 'CF Workers Demo' }}));
-
-  // USERS
-  app.get('/api/users', async (c) => {
-    await UserEntity.ensureSeed(c.env);
+  // DEVICES
+  app.get('/api/devices', async (c) => {
+    await DeviceEntity.ensureSeed(c.env);
     const cq = c.req.query('cursor');
-    const lq = c.req.query('limit');
-    const page = await UserEntity.list(c.env, cq ?? null, lq ? Math.max(1, (Number(lq) | 0)) : undefined);
+    const page = await DeviceEntity.list(c.env, cq ?? null, 50);
     return ok(c, page);
   });
-
-  app.post('/api/users', async (c) => {
-    const { name } = (await c.req.json()) as { name?: string };
-    if (!name?.trim()) return bad(c, 'name required');
-    return ok(c, await UserEntity.create(c.env, { id: crypto.randomUUID(), name: name.trim() }));
+  app.get('/api/devices/:id', async (c) => {
+    const dev = new DeviceEntity(c.env, c.req.param('id'));
+    if (!await dev.exists()) return notFound(c, 'device not found');
+    return ok(c, await dev.getState());
   });
-
-  // CHATS
-  app.get('/api/chats', async (c) => {
-    await ChatBoardEntity.ensureSeed(c.env);
-    const cq = c.req.query('cursor');
-    const lq = c.req.query('limit');
-    const page = await ChatBoardEntity.list(c.env, cq ?? null, lq ? Math.max(1, (Number(lq) | 0)) : undefined);
+  app.post('/api/devices/:id/heartbeat', async (c) => {
+    const id = c.req.param('id');
+    const data = (await c.req.json()) as DeviceHeartbeat;
+    const dev = new DeviceEntity(c.env, id);
+    if (!await dev.exists()) {
+      // Auto-register if not found during heartbeat in this simplified logic
+      const newDev = await DeviceEntity.create(c.env, {
+        id,
+        orgId: 'org-1',
+        name: `Device ${id.slice(0,4)}`,
+        status: data.status,
+        platform: 'WebPlayer',
+        appVersion: '1.0.0',
+        lastHeartbeatAt: Date.now(),
+        telemetry: data.telemetry
+      });
+      return ok(c, newDev);
+    }
+    return ok(c, await dev.heartbeat(data));
+  });
+  // PLAYLISTS
+  app.get('/api/playlists', async (c) => {
+    await PlaylistEntity.ensureSeed(c.env);
+    const page = await PlaylistEntity.list(c.env, null, 50);
     return ok(c, page);
   });
-
-  app.post('/api/chats', async (c) => {
-    const { title } = (await c.req.json()) as { title?: string };
-    if (!title?.trim()) return bad(c, 'title required');
-    const created = await ChatBoardEntity.create(c.env, { id: crypto.randomUUID(), title: title.trim(), messages: [] });
-    return ok(c, { id: created.id, title: created.title });
+  app.get('/api/playlists/:id', async (c) => {
+    const pl = new PlaylistEntity(c.env, c.req.param('id'));
+    if (!await pl.exists()) return notFound(c, 'playlist not found');
+    return ok(c, await pl.getState());
   });
-
-  // MESSAGES
-  app.get('/api/chats/:chatId/messages', async (c) => {
-    const chat = new ChatBoardEntity(c.env, c.req.param('chatId'));
-    if (!await chat.exists()) return notFound(c, 'chat not found');
-    return ok(c, await chat.listMessages());
-  });
-
-  app.post('/api/chats/:chatId/messages', async (c) => {
-    const chatId = c.req.param('chatId');
-    const { userId, text } = (await c.req.json()) as { userId?: string; text?: string };
-    if (!isStr(userId) || !text?.trim()) return bad(c, 'userId and text required');
-    const chat = new ChatBoardEntity(c.env, chatId);
-    if (!await chat.exists()) return notFound(c, 'chat not found');
-    return ok(c, await chat.sendMessage(userId, text.trim()));
-  });
-
-  // DELETE: Users
-  app.delete('/api/users/:id', async (c) => ok(c, { id: c.req.param('id'), deleted: await UserEntity.delete(c.env, c.req.param('id')) }));
-
-  app.post('/api/users/deleteMany', async (c) => {
-    const { ids } = (await c.req.json()) as { ids?: string[] };
-    const list = ids?.filter(isStr) ?? [];
-    if (list.length === 0) return bad(c, 'ids required');
-    return ok(c, { deletedCount: await UserEntity.deleteMany(c.env, list), ids: list });
-  });
-
-  // DELETE: Chats
-  app.delete('/api/chats/:id', async (c) => ok(c, { id: c.req.param('id'), deleted: await ChatBoardEntity.delete(c.env, c.req.param('id')) }));
-
-  app.post('/api/chats/deleteMany', async (c) => {
-    const { ids } = (await c.req.json()) as { ids?: string[] };
-    const list = ids?.filter(isStr) ?? [];
-    if (list.length === 0) return bad(c, 'ids required');
-    return ok(c, { deletedCount: await ChatBoardEntity.deleteMany(c.env, list), ids: list });
+  app.get('/api/devices/:id/playlist', async (c) => {
+    const dev = new DeviceEntity(c.env, c.req.param('id'));
+    if (!await dev.exists()) return notFound(c, 'device not found');
+    const state = await dev.getState();
+    if (!state.assignedPlaylistId) return bad(c, 'no playlist assigned');
+    const pl = new PlaylistEntity(c.env, state.assignedPlaylistId);
+    if (!await pl.exists()) return notFound(c, 'assigned playlist missing');
+    return ok(c, await pl.getState());
   });
 }
