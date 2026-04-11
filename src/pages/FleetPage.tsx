@@ -39,14 +39,14 @@ export function FleetPage() {
   });
   useEffect(() => {
     if (!devicesData?.items) return;
-    const anomalies = devicesData.items.filter(d => (d.telemetry.playbackErrors?.length ?? 0) > 0 || d.telemetry.escalationLevel !== 'none');
+    const anomalies = devicesData.items.filter(d => (d.telemetry?.playbackErrors?.length ?? 0) > 0 || d.telemetry?.escalationLevel !== 'none');
     anomalies.forEach(d => {
-      if (!alertedAnomalies.current.has(d.id + d.telemetry.escalationLevel)) {
+      if (!alertedAnomalies.current.has(d.id + (d.telemetry?.escalationLevel ?? 'none'))) {
         toast.warning(`Security Alert: ${d.name}`, {
-          description: `Device entered ${d.telemetry.escalationLevel} mode. Watchdog active.`,
+          description: `Device entered ${d.telemetry?.escalationLevel ?? 'unknown'} mode. Watchdog active.`,
           id: `anom-${d.id}`
         });
-        alertedAnomalies.current.add(d.id + d.telemetry.escalationLevel);
+        alertedAnomalies.current.add(d.id + (d.telemetry?.escalationLevel ?? 'none'));
       }
     });
   }, [devicesData]);
@@ -138,24 +138,24 @@ export function FleetPage() {
                         {device.status === 'emergency_mode' ? <AlertTriangle className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
                       </div>
                       <div>
-                        <div className="font-bold text-sm">{device.name}</div>
-                        <div className="text-[10px] font-mono text-slate-400">REV_{device.appVersion}</div>
+                        <div className="font-bold text-sm">{device.name ?? 'Unnamed'}</div>
+                        <div className="text-[10px] font-mono text-slate-400">REV_{device.appVersion ?? 'unknown'}</div>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant={device.telemetry.escalationLevel === 'none' ? 'outline' : 'destructive'} className="text-[9px]">
-                      {device.telemetry.escalationLevel.toUpperCase()}
+                    <Badge variant={device.telemetry?.escalationLevel === 'none' ? 'outline' : 'destructive'} className="text-[9px]">
+                      {(device.telemetry?.escalationLevel ?? 'unknown').toUpperCase()}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <div className="w-24 h-1 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500" style={{ width: `${device.telemetry.cpuUsage}%` }} />
+                      <div className="h-full bg-indigo-500" style={{ width: `${device.telemetry?.cpuUsage ?? 0}%` }} />
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="font-mono text-[9px] text-slate-400 truncate w-32">
-                      {device.expectedNonce || 'UNINITIALIZED'}
+                      {device.expectedNonce ?? 'UNINITIALIZED'}
                     </div>
                   </TableCell>
                   <TableCell className="px-6 text-right font-mono text-[10px] font-bold text-slate-400 uppercase">
@@ -168,8 +168,8 @@ export function FleetPage() {
         </div>
       </div>
       
-      <Sheet open={provisionOpen || !!provisionResult} onOpenChange={(open) => { if (!open) setProvisionResult(null); setProvisionOpen(open); }} position='right' size='sm'>
-        <SheetContent className='w-[425px]'>
+      <Sheet open={provisionOpen || !!provisionResult} onOpenChange={(open) => { if (!open) setProvisionResult(null); setProvisionOpen(open); }}>
+        <SheetContent side="right" className='w-[425px]'>
           <SheetHeader>
             <SheetTitle>Provision Device Node</SheetTitle>
             <SheetDescription>Select platform & version</SheetDescription>
@@ -249,7 +249,7 @@ export function FleetPage() {
                       <ShieldCheck className="h-8 w-8" />
                     </div>
                     <div>
-                      <SheetTitle className="text-2xl font-black">{viewingDevice.name}</SheetTitle>
+                      <SheetTitle className="text-2xl font-black">{viewingDevice.name ?? 'Device'}</SheetTitle>
                       <SheetDescription className="font-mono text-[10px] uppercase text-indigo-500 font-bold">
                         Security Cluster: High-Integrity
                       </SheetDescription>
@@ -263,11 +263,11 @@ export function FleetPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 rounded-xl bg-muted/30 border space-y-1">
                   <div className="text-[9px] font-black uppercase text-muted-foreground">Watchdog Status</div>
-                  <div className="font-bold text-sm text-indigo-600">{viewingDevice.telemetry.escalationLevel.toUpperCase()}</div>
+                  <div className="font-bold text-sm text-indigo-600">{(viewingDevice.telemetry?.escalationLevel ?? 'NONE').toUpperCase()}</div>
                 </div>
                 <div className="p-4 rounded-xl bg-muted/30 border space-y-1">
                   <div className="text-[9px] font-black uppercase text-muted-foreground">Sync Interval</div>
-                  <div className="font-bold text-sm">{Math.round((viewingDevice.nextSyncInterval || 60000) / 1000)}s</div>
+                  <div className="font-bold text-sm">{Math.round((viewingDevice.nextSyncInterval ?? 60000) / 1000)}s</div>
                 </div>
               </div>
               <div className="space-y-4">
@@ -275,13 +275,13 @@ export function FleetPage() {
                   <Terminal className="h-4 w-4 text-indigo-500" /> Watchdog Ledger
                 </div>
                 <div className="space-y-2">
-                  {viewingDevice.logs.filter(l => l.event.toLowerCase().includes('watchdog') || l.event.toLowerCase().includes('integrity')).map((log) => (
+                  {(viewingDevice.logs ?? []).filter(l => l.event.toLowerCase().includes('watchdog') || l.event.toLowerCase().includes('integrity')).map((log) => (
                     <div key={log.id} className="p-3 rounded-lg border bg-slate-50 text-[10px] font-mono flex justify-between">
                       <span className="text-slate-600">{log.event}</span>
                       <span className="text-slate-400">{format(log.timestamp, 'HH:mm:ss')}</span>
                     </div>
                   ))}
-                  {viewingDevice.logs.length === 0 && <div className="text-center py-4 text-[10px] text-muted-foreground">No critical events recorded.</div>}
+                  {(viewingDevice.logs ?? []).length === 0 && <div className="text-center py-4 text-[10px] text-muted-foreground">No critical events recorded.</div>}
                 </div>
               </div>
               {viewingDevice.status === 'pairing' && (
