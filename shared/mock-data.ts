@@ -1,5 +1,5 @@
 import type { Device, Playlist } from './types';
-export const ROOT_PUB_KEY = "spki_base64_root_identity_mock_2025";
+export const ROOT_PUB_KEY = "1XasgGChtKrXm/TziWQncqDufLPi8qry8ASgfdwdR==";
 export const MOCK_PLAYLISTS: Playlist[] = [
   {
     id: 'p-1',
@@ -35,11 +35,13 @@ export const MOCK_DEVICES: Device[] = [
     id: 'dev-001',
     orgId: 'org-1',
     name: 'Lobby Simulator',
-    status: 'pairing',
-    platform: 'WebRuntime',
+    status: 'active',
+    platform: 'webos',
     appVersion: '3.0.0-PROD',
+    publicKey: ROOT_PUB_KEY,
     lastHeartbeatAt: now - 30000,
-    pairingExpiresAt: now + 600000,
+    expectedNonceSignature: 'expected-nonce-sig-123',
+    assignedPlaylistId: 'p-1',
     logs: [{ id: 'l-init-1', timestamp: now - 3600000, event: 'Node Cold Boot', level: 'info' }],
     metricsHistory: generateMetrics(),
     telemetry: {
@@ -47,7 +49,7 @@ export const MOCK_DEVICES: Device[] = [
       memUsage: 30,
       diskUsage: 12,
       uptimeSeconds: 3600,
-      playbackErrors: [] as string[],
+      playbackErrors: [],
       escalationLevel: 'none',
       cpuCores: 8,
       memoryLimit: 8192

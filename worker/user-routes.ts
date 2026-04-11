@@ -69,6 +69,16 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const page = await PlaylistEntity.list(c.env, null, 100);
     return ok(c, page);
   });
+  app.post('/api/v1/devices/:id/token/refresh', async (c) => {
+    const dev = new DeviceEntity(c.env, c.req.param('id'));
+    if (!await dev.exists()) return notFound(c);
+    const state = await dev.getState();
+    if (!state.refreshToken) return bad(c, 'No valid refresh token');
+    const newAccessToken = `at_mesh_${crypto.randomUUID()}`;
+    await dev.mutate(s => ({ ...s, accessToken: newAccessToken }));
+    return ok(c, { accessToken: newAccessToken });
+  });
+
   app.post('/api/v1/playlists/:id/publish', async (c) => {
     const { items } = await c.req.json<{ items: any[] }>();
     const pl = new PlaylistEntity(c.env, c.req.param('id'));

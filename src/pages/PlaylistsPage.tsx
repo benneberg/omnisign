@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Layers, Clock, GripVertical, Trash2, Save, ArrowLeft, RefreshCw, ShieldCheck, Code } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
-import { computeHash } from '@/lib/crypto-utils';
 import type { Playlist, PlaylistItem } from '@shared/types';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -28,8 +27,15 @@ function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemo
   const generateIntegrity = async () => {
     setIsHashing(true);
     try {
-      const hash = await computeHash(item.url + item.durationMs);
-      onChange({ integrity: hash });
+      const res = await fetch(item.url);
+      if(!res.ok) { 
+        toast.error('Cannot fetch for hash'); 
+        return; 
+      }
+      const buf = await res.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      onChange({ integrity: hashHex });
       toast.success('SHA256 Content Integrity Generated');
     } catch (e) {
       toast.error('Hashing failed');
@@ -119,7 +125,7 @@ export function PlaylistsPage() {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || !editingPlaylist) return;
+    if (!over || !editingPlaylist || !active.id) return;
     if (active.id !== over.id) {
       const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
       const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);

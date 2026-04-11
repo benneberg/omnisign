@@ -70,7 +70,7 @@ export function SimulatorPage() {
           await setStored("privateKey", privKey);
         }
         setKeys({ pub: pubBase64, priv: privKey });
-        const dev = await api<Device>(`/v1/devices/${id}`).catch(() => null);
+        const dev = id ? await api<Device>(`/v1/devices/${id}`).catch(() => null) : null;
         if (!dev || dev.status === 'new' || dev.status === 'pairing') {
           const init = await api<DeviceInitResponse>(`/v1/devices/init?id=${id}`, {
             method: 'POST',
@@ -107,7 +107,7 @@ export function SimulatorPage() {
       }
     },
     enabled: deviceState?.status === 'active',
-    refetchInterval: deviceState?.nextSyncInterval || 60000,
+    refetchInterval: (deviceState?.nextSyncInterval ?? 60000) as number,
   });
   // Anti-Spoof Heartbeat Loop
   useEffect(() => {
@@ -119,17 +119,18 @@ export function SimulatorPage() {
           platform: 'ScreenMesh-OS',
           appVersion: '3.1.0-STABLE',
           telemetry: {
-            ...deviceState.telemetry,
+            ...(deviceState.telemetry || {}),
             uptimeSeconds: Math.floor(performance.now() / 1000),
             playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
           }
         };
-        // Use the expectedNonce provided by the server for signing
-        const nonce = deviceState.expectedNonce || id;
-        const sig = await signData(keys.priv, JSON.stringify({ ...heartbeatPayload, nonce }));
+        const heartbeatPayloadWithSig = deviceState.expectedNonce 
+          ? { ...heartbeatPayload, signature: await signData(keys.priv, deviceState.expectedNonce) }
+          : heartbeatPayload;
+
         const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
           method: 'POST',
-          body: JSON.stringify({ ...heartbeatPayload, signature: sig, challenge: nonce })
+          body: JSON.stringify(heartbeatPayloadWithSig)
         });
         if (updated.accessToken) saveAuth(id!, updated.accessToken);
         setDeviceState(updated);
@@ -138,28 +139,36 @@ export function SimulatorPage() {
       }
     }, 15000);
     return () => clearInterval(hb);
-  }, [id, deviceState, isBooting, keys, watchdogMetrics.stalls]);
+  }, [id, deviceState?.id, isBooting, keys, watchdogMetrics.stalls]);
   // Read-Verify-Repair Integrity Check
   useEffect(() => {
     if (!manifest?.playlist?.items.length) return;
     const item = manifest.playlist.items[currentIndex];
     const verify = async () => {
       setIntegrityQueue(prev => [...prev, item.id]);
-      const actualHash = await computeHash(item.url + item.durationMs);
-      // Artificial corruption sim (1% chance)
-      const isCorrupt = Math.random() < 0.01;
-      const isValid = isCorrupt ? false : (item.integrity === actualHash || item.integrity === 'pending');
-      if (!isValid) {
-        toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
+      try {
+        const response = await fetch(item.url);
+        if (!response.ok) throw new Error('Fetch failed');
+        const buffer = await response.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+        const hashHex = Array.from(new Uint8Array(hashBuffer))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        const isValid = item.integrity === hashHex;
+        if (!isValid) {
+          toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
+          setResilienceTier('cached');
+        }
+      } catch (e) {
+        toast.error("INTEGRITY FAILURE: FETCH/VERIFY ERROR", { description: "Content unavailable - triggering fallback." });
         setResilienceTier('cached');
-        // In real app, we'd delete from IDB and refetch
       }
       setIntegrityQueue(prev => prev.filter(i => i !== item.id));
     };
     verify();
     const timer = setTimeout(() => {
       setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
-    }, item.durationMs);
+    }, Math.max(1000, item.durationMs || 5000));
     return () => clearTimeout(timer);
   }, [manifest, currentIndex]);
   if (isBooting) return (
@@ -191,6 +200,27 @@ export function SimulatorPage() {
             <QrCode size={180} />
             <div className="mt-6 text-5xl font-black font-mono tracking-[0.3em]">{pairingInfo?.pairingCode || '------'}</div>
           </div>
+          {pairingInfo && keys && (
+            <button
+              onClick={async () => {
+                try {
+                  const sig = await signData(keys.priv, `${pairingInfo.pairingCode}${pairingInfo.challenge || ''}`);
+                  const result = await api(`/v1/devices/${id}/pair`, {
+                    method: 'POST',
+                    body: JSON.stringify({ code: pairingInfo.pairingCode, signature: sig })
+                  });
+                  setPairingInfo(null);
+                  setDeviceState(result);
+                  toast.success('Device Paired Successfully!');
+                } catch (e: any) {
+                  toast.error('Pairing Failed: ' + (e.message || 'Invalid signature'));
+                }
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 px-8 rounded-2xl text-lg uppercase tracking-wider shadow-glow transition-all duration-200 border-2 border-indigo-500/50"
+            >
+              VERIFY & ACTIVATE
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -203,7 +233,14 @@ export function SimulatorPage() {
           <motion.div key={activeItem.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
             {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" />}
             {activeItem.type === 'video' && <video src={activeItem.url} autoPlay muted loop className="w-full h-full object-cover" />}
-            {activeItem.type === 'html' && <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: activeItem.htmlContent || '' }} />}
+            {activeItem.type === 'html' && (
+              <iframe 
+                srcDoc={activeItem.htmlContent || '<p>Empty</p>'}
+                sandbox="allow-scripts allow-same-origin allow-popups"
+                className="w-full h-full border-0"
+                title="html-content"
+              />
+            )}
             {activeItem.type === 'url' && <iframe src={activeItem.url} title="content" className="w-full h-full border-0" />}
           </motion.div>
         )}
