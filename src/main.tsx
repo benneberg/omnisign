@@ -15,6 +15,7 @@ import { HomePage } from '@/pages/HomePage'
 import { FleetPage } from '@/pages/FleetPage'
 import { PlaylistsPage } from '@/pages/PlaylistsPage'
 import { SimulatorPage } from '@/pages/SimulatorPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -59,4 +60,3 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
-import { SettingsPage } from '@/pages/SettingsPage'

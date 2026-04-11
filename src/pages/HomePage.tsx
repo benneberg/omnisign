@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Monitor, CheckCircle2, ShieldAlert, Zap, Activity, Clock, Server } from 'lucide-react';
 import { Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
@@ -44,7 +45,7 @@ export function HomePage() {
             { title: "Anomalies Detected", value: issuesCount, sub: "Watchdog Alerts", icon: ShieldAlert, color: "rose" },
             { title: "Fleet MTBF", value: `${avgUptime}h`, sub: "Avg Uninterrupted", icon: Clock, color: "amber" },
           ].map((stat, i) => (
-            <motion.div 
+            <motion.div
               key={stat.title}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -52,13 +53,21 @@ export function HomePage() {
               whileHover={{ scale: 1.02 }}
               className="group"
             >
-              <Card className={`border-l-4 border-l-${stat.color}-500 shadow-soft transition-shadow hover:shadow-lg h-full`}>
+              <Card className={`border-l-4 shadow-soft transition-shadow hover:shadow-lg h-full ${
+                stat.color === 'indigo' ? 'border-l-indigo-500' :
+                stat.color === 'emerald' ? 'border-l-emerald-500' :
+                stat.color === 'rose' ? 'border-l-rose-500' : 'border-l-amber-500'
+              }`}>
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{stat.title}</CardTitle>
-                  <stat.icon className={`h-4 w-4 text-${stat.color}-500 opacity-70 group-hover:opacity-100 transition-opacity`} />
+                  <stat.icon className={`h-4 w-4 opacity-70 group-hover:opacity-100 transition-opacity ${
+                    stat.color === 'indigo' ? 'text-indigo-500' :
+                    stat.color === 'emerald' ? 'text-emerald-500' :
+                    stat.color === 'rose' ? 'text-rose-500' : 'text-amber-500'
+                  }`} />
                 </CardHeader>
                 <CardContent>
-                  <div className={`text-3xl font-bold text-foreground`}>{stat.value}</div>
+                  <div className="text-3xl font-bold text-foreground">{stat.value}</div>
                   <p className="text-[10px] text-muted-foreground mt-1 uppercase font-semibold">{stat.sub}</p>
                 </CardContent>
               </Card>
@@ -132,8 +141,8 @@ export function HomePage() {
                   { id: 2, text: 'New Pairing Challenge: Node_X2', time: '12m ago' },
                   { id: 3, text: 'Token Rotated: ScreenMesh_Core', time: '1h ago' },
                 ].map((feed, i) => (
-                  <motion.div 
-                    key={feed.id} 
+                  <motion.div
+                    key={feed.id}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.5 + (i * 0.1) }}

@@ -1,5 +1,5 @@
 import { IndexedEntity } from "./core-utils";
-import type { Device, Playlist, DeviceHeartbeat, Manifest, AuditLog } from "@shared/types";
+import type { Device, Playlist, DeviceHeartbeat, Manifest, AuditLog, AuthTokenResponse } from "@shared/types";
 import { MOCK_DEVICES, MOCK_PLAYLISTS } from "@shared/mock-data";
 export class DeviceEntity extends IndexedEntity<Device> {
   static readonly entityName = "device";
@@ -23,11 +23,7 @@ export class DeviceEntity extends IndexedEntity<Device> {
       playbackErrors: []
     }
   };
-  static seedData = MOCK_DEVICES.map(d => ({
-    ...d,
-    logs: [{ id: "l1", timestamp: Date.now(), event: "Entity Seeded", level: 'info' }],
-    metricsHistory: { cpu: [10, 12, 8, 15], mem: [30, 31, 29, 32], timestamps: [Date.now()] }
-  })) as any;
+  static seedData = MOCK_DEVICES;
   async addLog(event: string, level: AuditLog['level'], details?: string): Promise<void> {
     await this.mutate(s => ({
       ...s,
@@ -57,6 +53,17 @@ export class DeviceEntity extends IndexedEntity<Device> {
     }
     return false;
   }
+  async refreshToken(): Promise<AuthTokenResponse> {
+    const accessToken = `at_mesh_${crypto.randomUUID()}`;
+    const refreshToken = `rt_mesh_${crypto.randomUUID()}`;
+    await this.mutate(s => ({
+      ...s,
+      accessToken,
+      refreshToken
+    }));
+    await this.addLog("Auth tokens rotated", "info");
+    return { accessToken, refreshToken };
+  }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
     const now = Date.now();
     return this.mutate(s => ({
@@ -67,9 +74,9 @@ export class DeviceEntity extends IndexedEntity<Device> {
       telemetry: data.telemetry,
       lastHeartbeatAt: now,
       metricsHistory: {
-        cpu: [...s.metricsHistory.cpu, data.telemetry.cpuUsage].slice(-20),
-        mem: [...s.metricsHistory.mem, data.telemetry.memUsage].slice(-20),
-        timestamps: [...s.metricsHistory.timestamps, now].slice(-20)
+        cpu: [...(s.metricsHistory?.cpu || []), data.telemetry.cpuUsage].slice(-20),
+        mem: [...(s.metricsHistory?.mem || []), data.telemetry.memUsage].slice(-20),
+        timestamps: [...(s.metricsHistory?.timestamps || []), now].slice(-20)
       }
     }));
   }

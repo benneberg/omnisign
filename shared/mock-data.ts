@@ -53,6 +53,12 @@ export const MOCK_PLAYLISTS: Playlist[] = [
     ]
   }
 ];
+const now = Date.now();
+const generateMetrics = () => ({
+  cpu: Array.from({ length: 20 }, () => Math.floor(Math.random() * 20) + 10),
+  mem: Array.from({ length: 20 }, () => Math.floor(Math.random() * 15) + 30),
+  timestamps: Array.from({ length: 20 }, (_, i) => now - (19 - i) * 60000)
+});
 export const MOCK_DEVICES: Device[] = [
   {
     id: 'dev-001',
@@ -61,15 +67,17 @@ export const MOCK_DEVICES: Device[] = [
     status: 'active',
     platform: 'WebOS',
     appVersion: '2.4.1',
-    lastHeartbeatAt: Date.now() - 30000,
+    lastHeartbeatAt: now - 30000,
     assignedPlaylistId: 'p-1',
     pairingExpiresAt: 0,
+    logs: [{ id: 'l-init-1', timestamp: now - 3600000, event: 'System Boot', level: 'info' }],
+    metricsHistory: generateMetrics(),
     telemetry: {
       cpuUsage: 12,
       memUsage: 45,
       diskUsage: 20,
       uptimeSeconds: 86400,
-      playbackErrors: []
+      playbackErrors: [] as string[]
     }
   },
   {
@@ -79,15 +87,17 @@ export const MOCK_DEVICES: Device[] = [
     status: 'offline',
     platform: 'Tizen',
     appVersion: '2.3.0',
-    lastHeartbeatAt: Date.now() - 600000, // > 5 mins
+    lastHeartbeatAt: now - 600000,
     assignedPlaylistId: 'p-1',
     pairingExpiresAt: 0,
+    logs: [{ id: 'l-init-2', timestamp: now - 7200000, event: 'Watchdog Timeout', level: 'error' }],
+    metricsHistory: generateMetrics(),
     telemetry: {
       cpuUsage: 0,
       memUsage: 0,
       diskUsage: 22,
       uptimeSeconds: 0,
-      playbackErrors: []
+      playbackErrors: [] as string[]
     }
   },
   {
@@ -97,14 +107,16 @@ export const MOCK_DEVICES: Device[] = [
     status: 'pairing',
     platform: 'Android',
     appVersion: '3.0.0-beta',
-    lastHeartbeatAt: Date.now() - 5000,
-    pairingExpiresAt: Date.now() + 600000,
+    lastHeartbeatAt: now - 5000,
+    pairingExpiresAt: now + 600000,
+    logs: [{ id: 'l-init-3', timestamp: now - 5000, event: 'Pairing Initiated', level: 'info' }],
+    metricsHistory: generateMetrics(),
     telemetry: {
       cpuUsage: 5,
       memUsage: 12,
       diskUsage: 5,
       uptimeSeconds: 120,
-      playbackErrors: []
+      playbackErrors: [] as string[]
     }
   }
 ];
