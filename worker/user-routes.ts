@@ -4,52 +4,57 @@ import { DeviceEntity, PlaylistEntity } from "./entities";
 import { ok, bad, notFound, isStr } from './core-utils';
 import type { DeviceHeartbeat } from "@shared/types";
 export function userRoutes(app: Hono<{ Bindings: Env }>) {
-  // DEVICES
   app.get('/v1/devices', async (c) => {
     await DeviceEntity.ensureSeed(c.env);
     const cq = c.req.query('cursor');
-    const page = await DeviceEntity.list(c.env, cq ?? null, 50);
+    const page = await DeviceEntity.list(c.env, cq ?? null, 100);
     return ok(c, page);
   });
   app.post('/v1/devices/init', async (c) => {
+    const { platform, appVersion, publicKey } = await c.req.json<{ platform: string, appVersion: string, publicKey?: string }>();
     const id = crypto.randomUUID();
-    const dev = await DeviceEntity.create(c.env, {
+    await DeviceEntity.create(c.env, {
       ...DeviceEntity.initialState,
       id,
-      name: `Display ${id.slice(0, 4)}`,
+      name: `Node ${id.slice(0, 4)}`,
+      platform: platform || 'unknown',
+      appVersion: appVersion || '0.0.0'
     });
     const ent = new DeviceEntity(c.env, id);
-    const pairingCode = await ent.generatePairingCode();
-    return ok(c, { deviceId: id, pairingCode });
+    const { code, expiresAt } = await ent.generatePairingCode(publicKey);
+    return ok(c, { deviceId: id, pairingCode: code, pairingExpiresAt: expiresAt });
   });
   app.post('/v1/devices/:id/pair', async (c) => {
     const { code } = await c.req.json<{ code: string }>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
     const success = await dev.verifyPairing(code);
-    if (!success) return bad(c, 'Invalid pairing code');
+    if (!success) return bad(c, 'Invalid or expired pairing code');
     return ok(c, await dev.getState());
   });
-  app.get('/v1/devices/:id', async (c) => {
+  app.post('/v1/devices/:id/token/refresh', async (c) => {
     const dev = new DeviceEntity(c.env, c.req.param('id'));
-    if (!await dev.exists()) return notFound(c, 'device not found');
-    return ok(c, await dev.getState());
+    if (!await dev.exists()) return notFound(c);
+    const tokens = await dev.refreshToken();
+    return ok(c, tokens);
   });
-  app.post('/v1/devices/:id/heartbeat', async (c) => {
-    const id = c.req.param('id');
-    const data = (await c.req.json()) as DeviceHeartbeat;
-    const dev = new DeviceEntity(c.env, id);
-    if (!await dev.exists()) {
-      return notFound(c, 'Device not registered');
-    }
-    const updated = await dev.heartbeat(data);
-    return ok(c, updated);
+  app.post('/v1/devices/bulk/assign', async (c) => {
+    const { deviceIds, playlistId } = await c.req.json<{ deviceIds: string[], playlistId: string }>();
+    if (!Array.isArray(deviceIds) || !isStr(playlistId)) return bad(c, 'Invalid request');
+    const results = await Promise.all(deviceIds.map(async id => {
+      const dev = new DeviceEntity(c.env, id);
+      if (await dev.exists()) return dev.assignPlaylist(playlistId);
+      return null;
+    }));
+    return ok(c, { count: results.filter(Boolean).length });
   });
-  // PLAYLISTS
-  app.get('/v1/playlists', async (c) => {
-    await PlaylistEntity.ensureSeed(c.env);
-    const page = await PlaylistEntity.list(c.env, null, 50);
-    return ok(c, page);
+  app.post('/v1/devices/bulk/reboot', async (c) => {
+    const { deviceIds } = await c.req.json<{ deviceIds: string[] }>();
+    return ok(c, { message: `Reboot command sent to ${deviceIds.length} devices` });
+  });
+  app.post('/v1/devices/bulk/clear-cache', async (c) => {
+    const { deviceIds } = await c.req.json<{ deviceIds: string[] }>();
+    return ok(c, { message: `Cache purge command sent to ${deviceIds.length} devices` });
   });
   app.get('/v1/devices/:id/playlist', async (c) => {
     const dev = new DeviceEntity(c.env, c.req.param('id'));
@@ -58,23 +63,14 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     if (!state.assignedPlaylistId) return bad(c, 'No playlist assigned');
     const pl = new PlaylistEntity(c.env, state.assignedPlaylistId);
     if (!await pl.exists()) return notFound(c);
-    const playlist = await pl.getState();
-    // Traffic shaping headers
-    c.header('ETag', `W/"v${playlist.version}"`);
-    c.header('X-Next-Sync', '30'); // Poll every 30s
-    return ok(c, playlist);
+    const manifest = await pl.getSignedManifest();
+    c.header('ETag', manifest.etag);
+    c.header('X-Next-Sync', (30 + Math.random() * 10).toFixed(0));
+    return ok(c, manifest);
   });
-  app.post('/v1/devices/:id/assign', async (c) => {
-    const { playlistId } = await c.req.json<{ playlistId: string }>();
-    if (!isStr(playlistId)) return bad(c, 'playlistId required');
-    const dev = new DeviceEntity(c.env, c.req.param('id'));
-    if (!await dev.exists()) return notFound(c);
-    return ok(c, await dev.assignPlaylist(playlistId));
-  });
-  app.post('/v1/playlists/:id/publish', async (c) => {
-    const { items } = await c.req.json<{ items: any[] }>();
-    const pl = new PlaylistEntity(c.env, c.req.param('id'));
-    if (!await pl.exists()) return notFound(c);
-    return ok(c, await pl.publish(items));
+  app.get('/v1/playlists', async (c) => {
+    await PlaylistEntity.ensureSeed(c.env);
+    const page = await PlaylistEntity.list(c.env, null, 100);
+    return ok(c, page);
   });
 }

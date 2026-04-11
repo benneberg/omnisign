@@ -1,177 +1,159 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { MoreHorizontal, Monitor, ExternalLink, RefreshCcw, Plus, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Monitor, RefreshCcw, Plus, Trash2, ShieldAlert, Layers, RotateCcw } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
-import type { Device } from '@shared/types';
+import type { Device, Playlist } from '@shared/types';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 export function FleetPage() {
   const queryClient = useQueryClient();
-  const [pairingOpen, setPairingOpen] = useState(false);
-  const [pairCode, setPairCode] = useState('');
-  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const { data: devicesData, isLoading, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: () => api<{ items: Device[] }>('/v1/devices'),
   });
-  const pairMutation = useMutation({
-    mutationFn: ({ id, code }: { id: string, code: string }) => api(`/v1/devices/${id}/pair`, {
+  const { data: playlistsData } = useQuery({
+    queryKey: ['playlists'],
+    queryFn: () => api<{ items: Playlist[] }>('/v1/playlists'),
+  });
+  const bulkAssign = useMutation({
+    mutationFn: (playlistId: string) => api('/v1/devices/bulk/assign', {
       method: 'POST',
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ deviceIds: selectedIds, playlistId })
     }),
     onSuccess: () => {
+      toast.success('Playlist assigned to selected devices');
+      setSelectedIds([]);
       queryClient.invalidateQueries({ queryKey: ['devices'] });
-      setPairingOpen(false);
-      setPairCode('');
     }
   });
-  const devices = devicesData?.items ?? [];
+  const bulkAction = useMutation({
+    mutationFn: (type: 'reboot' | 'clear-cache') => api(`/v1/devices/bulk/${type}`, {
+      method: 'POST',
+      body: JSON.stringify({ deviceIds: selectedIds })
+    }),
+    onSuccess: (data: any) => {
+      toast.info(data.message);
+      setSelectedIds([]);
+    }
+  });
+  const devices = useMemo(() => {
+    const list = devicesData?.items ?? [];
+    if (statusFilter === 'all') return list;
+    return list.filter(d => d.status === statusFilter);
+  }, [devicesData, statusFilter]);
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+  const toggleAll = () => {
+    setSelectedIds(prev => prev.length === devices.length ? [] : devices.map(d => d.id));
+  };
   return (
     <AppLayout container>
-      <div className="space-y-8">
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Fleet Monitor</h1>
-            <p className="text-muted-foreground mt-1">Real-time observability and hardware orchestration.</p>
+            <h1 className="text-3xl font-bold tracking-tight">Fleet Orchestration</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Manage {devices.length} execution nodes across the mesh.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => refetch()} disabled={isLoading}>
-              <RefreshCcw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Sync Fleet
+              <RefreshCcw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> Sync
             </Button>
-            <Button onClick={() => {
-              // In this prototype, we'd trigger the /init flow to get a deviceId
-              api<{ deviceId: string, pairingCode: string }>('/v1/devices/init', { method: 'POST' })
-                .then(res => {
-                  setSelectedDeviceId(res.deviceId);
-                  setPairingOpen(true);
-                });
-            }}>
-              <Plus className="mr-2 h-4 w-4" /> Pair New Node
+            <Button onClick={() => toast.info('Initialization flow triggered in player')}>
+              <Plus className="mr-2 h-4 w-4" /> Add Node
             </Button>
           </div>
         </div>
-        <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="flex items-center justify-between">
+          <Tabs value={statusFilter} onValueChange={setStatusFilter} className="w-auto">
+            <TabsList>
+              <TabsTrigger value="all">All Nodes</TabsTrigger>
+              <TabsTrigger value="active">Active</TabsTrigger>
+              <TabsTrigger value="pairing">Pairing</TabsTrigger>
+              <TabsTrigger value="offline">Offline</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
+              <span className="text-xs font-bold mr-2 text-indigo-600">{selectedIds.length} Selected</span>
+              <Select onValueChange={(v) => bulkAssign.mutate(v)}>
+                <SelectTrigger className="w-40 h-8 text-xs">
+                  <Layers className="h-3 w-3 mr-2" /> <SelectValue placeholder="Assign Playlist" />
+                </SelectTrigger>
+                <SelectContent>
+                  {playlistsData?.items.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => bulkAction.mutate('reboot')}>
+                <RotateCcw className="h-3 w-3 mr-2" /> Reboot
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => bulkAction.mutate('clear-cache')}>
+                <Trash2 className="h-3 w-3 mr-2" /> Purge Cache
+              </Button>
+            </div>
+          )}
+        </div>
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           <Table>
-            <TableHeader className="bg-muted/50">
+            <TableHeader className="bg-muted/30">
               <TableRow>
-                <TableHead>Execution Node</TableHead>
-                <TableHead>Health State</TableHead>
-                <TableHead>Load Profile</TableHead>
+                <TableHead className="w-12"><Checkbox checked={selectedIds.length === devices.length && devices.length > 0} onCheckedChange={toggleAll} /></TableHead>
+                <TableHead>Node Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Telemetry</TableHead>
                 <TableHead>Firmware</TableHead>
-                <TableHead>Last Heartbeat</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>Signal</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {devices.length === 0 && !isLoading && (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-64 text-center">
-                    <div className="flex flex-col items-center justify-center space-y-3">
-                      <Monitor className="h-12 w-12 text-muted-foreground opacity-20" />
-                      <div className="text-lg font-medium">No registered devices</div>
-                      <p className="text-sm text-muted-foreground max-w-xs">Start by pairing a ScreenMesh player using its unique 6-digit challenge code.</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-              {devices.map((device) => (
-                <TableRow key={device.id} className="hover:bg-muted/30 transition-colors">
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${device.status === 'active' ? 'bg-indigo-500/10 text-indigo-600' : 'bg-muted text-muted-foreground'}`}>
-                        <Monitor className="h-4 w-4" />
+              {devices.map((device) => {
+                const isVeryOffline = device.status === 'offline' && (Date.now() - device.lastHeartbeatAt > 300000);
+                return (
+                  <TableRow key={device.id} className="group">
+                    <TableCell><Checkbox checked={selectedIds.includes(device.id)} onCheckedChange={() => toggleSelect(device.id)} /></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Monitor className={`h-4 w-4 ${device.status === 'active' ? 'text-indigo-500' : 'text-muted-foreground'}`} />
+                        <div>
+                          <div className="font-bold text-sm">{device.name}</div>
+                          <div className="text-[10px] font-mono text-muted-foreground uppercase">{device.id.slice(0, 8)}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold">{device.name}</div>
-                        <div className="text-2xs font-mono text-muted-foreground uppercase">{device.id.slice(0, 8)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${device.status === 'active' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : device.status === 'offline' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+                        <span className="capitalize text-xs font-medium">{device.status}</span>
+                        {isVeryOffline && <ShieldAlert className="h-3 w-3 text-rose-500 animate-bounce" />}
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full ${device.status === 'active' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : device.status === 'offline' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
-                      <span className="capitalize text-sm font-medium">{device.status}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1.5 w-32">
-                      <div className="flex justify-between text-[10px] text-muted-foreground uppercase">
-                        <span>CPU</span>
-                        <span>{device.telemetry.cpuUsage}%</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-4 text-[10px] font-medium text-muted-foreground uppercase">
+                        <span>CPU {device.telemetry.cpuUsage}%</span>
+                        <span>MEM {device.telemetry.memUsage}%</span>
                       </div>
-                      <div className="h-1 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500" style={{ width: `${device.telemetry.cpuUsage}%` }} />
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px] font-mono">v{device.appVersion}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs font-medium">
-                    {device.lastHeartbeatAt > 0 ? formatDistanceToNow(device.lastHeartbeatAt, { addSuffix: true }) : 'NO_SIGNAL'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="h-8 w-8 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem asChild>
-                          <a href={`/simulator/${device.id}`} target="_blank" className="flex items-center cursor-pointer">
-                            <ExternalLink className="mr-2 h-4 w-4" /> Launch Player
-                          </a>
-                        </DropdownMenuItem>
-                        {device.status === 'pairing' && (
-                          <DropdownMenuItem onClick={() => {
-                            setSelectedDeviceId(device.id);
-                            setPairingOpen(true);
-                          }} className="text-indigo-600 font-bold">
-                            <CheckCircle2 className="mr-2 h-4 w-4" /> Approve Pairing
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem className="text-rose-600">
-                          <ShieldAlert className="mr-2 h-4 w-4" /> Force Decommission
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell><Badge variant="outline" className="text-[10px]">v{device.appVersion}</Badge></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {device.lastHeartbeatAt > 0 ? formatDistanceToNow(device.lastHeartbeatAt, { addSuffix: true }) : 'NO_SIGNAL'}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
-        <Dialog open={pairingOpen} onOpenChange={setPairingOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Verify Device Challenge</DialogTitle>
-              <DialogDescription>
-                Enter the 6-digit pairing code displayed on the screen of device <code className="bg-muted px-1 rounded">{selectedDeviceId.slice(0, 8)}</code>.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <Input
-                placeholder="000000"
-                maxLength={6}
-                value={pairCode}
-                onChange={(e) => setPairCode(e.target.value)}
-                className="text-center text-3xl font-bold tracking-[0.5em] h-16"
-              />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setPairingOpen(false)}>Cancel</Button>
-              <Button onClick={() => pairMutation.mutate({ id: selectedDeviceId, code: pairCode })} disabled={pairCode.length !== 6 || pairMutation.isPending}>
-                {pairMutation.isPending ? 'Verifying...' : 'Authorize Node'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </AppLayout>
   );

@@ -4,6 +4,7 @@ export const MOCK_PLAYLISTS: Playlist[] = [
     id: 'p-1',
     name: 'Corporate Lobby Loop',
     version: 4,
+    updatedAt: Date.now() - 100000,
     items: [
       {
         id: 'pi-1',
@@ -30,15 +31,24 @@ export const MOCK_PLAYLISTS: Playlist[] = [
   },
   {
     id: 'p-2',
-    name: 'Employee Recognition',
-    version: 1,
+    name: 'OTA Update Promo',
+    version: 2,
+    updatedAt: Date.now() - 50000,
     items: [
       {
         id: 'pi-4',
-        type: 'image',
-        url: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=1200',
-        checksum: 'h321',
+        type: 'html',
+        url: '',
+        htmlContent: '<div style="background: linear-gradient(45deg, #4338CA, #10B981); height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: sans-serif;"><h1>OmniSign OS v2.4 Launch</h1></div>',
+        checksum: 'h-html-01',
         durationMs: 10000,
+      },
+      {
+        id: 'pi-5',
+        type: 'video',
+        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+        checksum: 'h-vid-02',
+        durationMs: 20000,
       }
     ]
   }
@@ -53,11 +63,13 @@ export const MOCK_DEVICES: Device[] = [
     appVersion: '2.4.1',
     lastHeartbeatAt: Date.now() - 30000,
     assignedPlaylistId: 'p-1',
+    pairingExpiresAt: 0,
     telemetry: {
       cpuUsage: 12,
       memUsage: 45,
       diskUsage: 20,
       uptimeSeconds: 86400,
+      playbackErrors: []
     }
   },
   {
@@ -67,13 +79,15 @@ export const MOCK_DEVICES: Device[] = [
     status: 'offline',
     platform: 'Tizen',
     appVersion: '2.3.0',
-    lastHeartbeatAt: Date.now() - 3600000,
+    lastHeartbeatAt: Date.now() - 600000, // > 5 mins
     assignedPlaylistId: 'p-1',
+    pairingExpiresAt: 0,
     telemetry: {
       cpuUsage: 0,
       memUsage: 0,
       diskUsage: 22,
       uptimeSeconds: 0,
+      playbackErrors: []
     }
   },
   {
@@ -84,11 +98,13 @@ export const MOCK_DEVICES: Device[] = [
     platform: 'Android',
     appVersion: '3.0.0-beta',
     lastHeartbeatAt: Date.now() - 5000,
+    pairingExpiresAt: Date.now() + 600000,
     telemetry: {
       cpuUsage: 5,
       memUsage: 12,
       diskUsage: 5,
       uptimeSeconds: 120,
+      playbackErrors: []
     }
   }
 ];

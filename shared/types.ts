@@ -11,25 +11,30 @@ export interface Device {
   status: DeviceStatus;
   platform: string;
   appVersion: string;
-  lastHeartbeatAt: number; // epoch ms
+  lastHeartbeatAt: number;
   assignedPlaylistId?: string;
   pairingCode?: string;
+  pairingExpiresAt: number;
   publicKey?: string;
-  authToken?: string;
+  accessToken?: string;
+  refreshToken?: string;
   telemetry: {
     cpuUsage: number;
     memUsage: number;
     diskUsage: number;
     uptimeSeconds: number;
     playbackErrors: string[];
+    otaVersion?: string;
+    otaStatus?: 'idle' | 'downloading' | 'verifying' | 'applying';
   };
 }
-export type PlaylistItemType = 'image' | 'video';
+export type PlaylistItemType = 'image' | 'video' | 'html' | 'url';
 export type TransitionType = 'cut' | 'fade';
 export interface PlaylistItem {
   id: string;
   type: PlaylistItemType;
   url: string;
+  htmlContent?: string;
   checksum: string;
   durationMs: number;
   transition?: TransitionType;
@@ -47,11 +52,21 @@ export interface Manifest {
   etag: string;
   issuedAt: number;
 }
+export interface DeviceInitResponse {
+  deviceId: string;
+  pairingCode: string;
+  pairingExpiresAt: number;
+}
+export interface AuthTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+}
 export interface DeviceHeartbeat {
   status: DeviceStatus;
   platform: string;
   appVersion: string;
   telemetry: Device['telemetry'];
+  challengeResponse?: string;
 }
 export interface User {
   id: string;
