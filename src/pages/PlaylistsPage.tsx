@@ -12,20 +12,27 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import { computeHash } from '@/lib/crypto-utils';
 import type { Playlist, PlaylistItem } from '@shared/types';
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemove: () => void, onChange: (updates: Partial<PlaylistItem>) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const [isHashing, setIsHashing] = useState(false);
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const style = { 
+    transform: CSS.Transform.toString(transform), 
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    opacity: isDragging ? 0.6 : 1
+  };
   const generateIntegrity = async () => {
     setIsHashing(true);
     try {
       const hash = await computeHash(item.url + item.durationMs);
       onChange({ integrity: hash });
       toast.success('SHA256 Content Integrity Generated');
+    } catch (e) {
+      toast.error('Hashing failed');
     } finally {
       setIsHashing(false);
     }
@@ -33,7 +40,7 @@ function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemo
   return (
     <div ref={setNodeRef} style={style} className="flex flex-col bg-card border rounded-xl p-5 mb-4 group shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-center gap-4 mb-4">
-        <div {...attributes} {...listeners} className="cursor-grab text-muted-foreground hover:text-foreground"><GripVertical className="h-5 w-5" /></div>
+        <div {...attributes} {...listeners} className="cursor-grab text-muted-foreground hover:text-foreground touch-none"><GripVertical className="h-5 w-5" /></div>
         <div className="h-12 w-20 bg-muted rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center border-2 border-dashed font-bold text-[10px] text-muted-foreground uppercase">
           {item.type}
         </div>
@@ -57,7 +64,7 @@ function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemo
         </div>
         <div>
           <Label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tighter">Duration (ms)</Label>
-          <Input type="number" value={item.durationMs} onChange={(e) => onChange({ durationMs: parseInt(e.target.value) })} className="h-9" />
+          <Input type="number" value={item.durationMs} onChange={(e) => onChange({ durationMs: parseInt(e.target.value) || 0 })} className="h-9" />
         </div>
         <div className="col-span-2">
           <Label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tighter flex items-center gap-1">
@@ -110,12 +117,15 @@ export function PlaylistsPage() {
     onError: (e) => toast.error(e.message)
   });
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-  const handleDragEnd = (event: any) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (active.id !== over.id && editingPlaylist) {
+    if (!over || !editingPlaylist) return;
+    if (active.id !== over.id) {
       const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
       const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);
-      setEditingPlaylist({ ...editingPlaylist, items: arrayMove(editingPlaylist.items, oldIndex, newIndex) });
+      if (oldIndex !== -1 && newIndex !== -1) {
+        setEditingPlaylist({ ...editingPlaylist, items: arrayMove(editingPlaylist.items, oldIndex, newIndex) });
+      }
     }
   };
   const playlists = playlistsData?.items ?? [];
@@ -129,7 +139,7 @@ export function PlaylistsPage() {
               <div>
                 <h1 className="text-2xl font-bold tracking-tight">{editingPlaylist.name}</h1>
                 <p className="text-xs text-muted-foreground flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px] font-mono">REVISION_{editingPlaylist.version}</Badge> 
+                  <Badge variant="outline" className="text-[10px] font-mono">REVISION_{editingPlaylist.version}</Badge>
                   Orchestrating High-Integrity Manifest
                 </p>
               </div>

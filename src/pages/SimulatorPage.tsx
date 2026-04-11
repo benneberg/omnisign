@@ -1,17 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api, saveAuth } from '@/lib/api-client';
-import { generateDeviceKeypair, exportKey, importKey, signData, computeHash } from '@/lib/crypto-utils';
-import type { Playlist, PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
-import { Activity, ShieldCheck, RefreshCw, Key, QrCode, AlertTriangle, Database, Terminal, Cpu } from 'lucide-react';
+import { generateDeviceKeypair, exportKey, signData, computeHash } from '@/lib/crypto-utils';
+import type { PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
+import { RefreshCw, Key, QrCode, Database, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 const DB_NAME = "ScreenMeshDB";
 const STORE_NAME = "Persistence";
 export function SimulatorPage() {
   const { id } = useParams();
-  const queryClient = useQueryClient();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [deviceState, setDeviceState] = useState<Device | null>(null);
@@ -28,7 +27,11 @@ export function SimulatorPage() {
   const getStored = async (key: string) => {
     return new Promise((resolve) => {
       const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+          req.result.createObjectStore(STORE_NAME);
+        }
+      };
       req.onsuccess = () => {
         const db = req.result;
         const tx = db.transaction(STORE_NAME, "readonly");
@@ -69,7 +72,7 @@ export function SimulatorPage() {
           if (isMounted.current) setDeviceState(dev);
         }
       } catch (e) {
-        console.error("Boot failure", e);
+        console.error("[Boot] Engine bootstrap failure", e);
       } finally {
         setTimeout(() => { if (isMounted.current) setIsBooting(false); }, 1500);
       }
@@ -82,9 +85,6 @@ export function SimulatorPage() {
       setIsUpdating(true);
       try {
         const data = await api<Manifest>(`/v1/devices/${id}/playlist`);
-        if (manifest?.playlist?.id !== data.playlist.id) {
-          setCurrentIndex(0); // Reset on playlist change
-        }
         await setStored(`manifest_${id}`, data);
         return data;
       } finally {
@@ -99,20 +99,20 @@ export function SimulatorPage() {
     const hb = setInterval(async () => {
       try {
         const perf = (window.performance as any);
-        const mem = perf.memory ? Math.round(perf.memory.usedJSHeapSize / 1024 / 1024) : 0;
-        const totalMem = perf.memory ? Math.round(perf.memory.jsHeapSizeLimit / 1024 / 1024) : 0;
+        const mem = perf.memory ? Math.round(perf.memory.usedJSHeapSize / 1024 / 1024) : 45;
+        const totalMem = perf.memory ? Math.round(perf.memory.jsHeapSizeLimit / 1024 / 1024) : 1024;
         const heartbeatPayload = {
           status: deviceState?.status || 'pairing',
           platform: 'ScreenMesh-OS',
           appVersion: '3.1.0-RC',
           telemetry: {
-            cpuUsage: Math.floor(Math.random() * 10) + 2,
-            memUsage: mem ? Math.round((mem / totalMem) * 100) : 25,
+            cpuUsage: Math.floor(Math.random() * 8) + 2,
+            memUsage: Math.round((mem / totalMem) * 100),
             diskUsage: 12,
             uptimeSeconds: Math.floor(performance.now() / 1000),
             playbackErrors: [],
             cpuCores: navigator.hardwareConcurrency || 4,
-            memoryLimit: totalMem || 4096
+            memoryLimit: totalMem
           }
         };
         const sig = await signData(keys.priv, JSON.stringify(heartbeatPayload));
@@ -126,7 +126,7 @@ export function SimulatorPage() {
           toast.success("Identity Verified: Node Authorized");
         }
       } catch (e) {
-        console.warn("Heartbeat lost", e);
+        console.warn("[Watchdog] Heartbeat signal lost", e);
       }
     }, 10000);
     return () => clearInterval(hb);
@@ -136,14 +136,13 @@ export function SimulatorPage() {
     const item = manifest.playlist.items[currentIndex];
     const verifyIntegrity = async () => {
       const realHash = await computeHash(item.url + item.durationMs);
-      const isCorrupt = Math.random() < 0.01;
-      const status = isCorrupt ? false : (item.integrity === 'pending' || item.integrity === realHash);
+      const isCorrupt = Math.random() < 0.005; // 0.5% failure injection for demo purposes
+      const isValid = isCorrupt ? false : (item.integrity === 'pending' || item.integrity === realHash);
       setCache(prev => {
-        const exists = prev.find(c => c.hash === item.id);
-        if (exists) return prev;
-        return [{ hash: item.id, integrity: status }, ...prev].slice(0, 5);
+        const filtered = prev.filter(c => c.hash !== item.id);
+        return [{ hash: item.id, integrity: isValid }, ...filtered].slice(0, 5);
       });
-      if (!status) {
+      if (!isValid) {
         setSelfHealing(item.id);
         setTimeout(() => {
           setCache(prev => prev.map(c => c.hash === item.id ? { ...c, integrity: true } : c));
@@ -153,12 +152,12 @@ export function SimulatorPage() {
       }
     };
     verifyIntegrity();
+    // System watchdog: Detect frame rate drops (backgrounding)
     let lastFrame = performance.now();
     let watchdogActive = true;
-    const monitor = () => {
-      const now = performance.now();
-      if (now - lastFrame > 1500 && watchdogActive) {
-        toast.error("WATCHDOG: ENGINE STALL. INITIATING SYNC.");
+    const monitor = (now: number) => {
+      if (now - lastFrame > 3000 && watchdogActive && !document.hidden) {
+        toast.error("WATCHDOG: ENGINE STALL. INITIATING RECOVERY.");
         forceSync();
         watchdogActive = false;
       }
@@ -166,11 +165,16 @@ export function SimulatorPage() {
       if (watchdogActive) requestAnimationFrame(monitor);
     };
     const rafId = requestAnimationFrame(monitor);
+    // Playback watchdog: Advance playlist
     const timer = setTimeout(() => {
       watchdogActive = false;
       if (isMounted.current) setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
     }, item.durationMs);
-    return () => { clearTimeout(timer); watchdogActive = false; cancelAnimationFrame(rafId); };
+    return () => { 
+      clearTimeout(timer); 
+      watchdogActive = false; 
+      cancelAnimationFrame(rafId); 
+    };
   }, [manifest, currentIndex, forceSync]);
   if (isBooting) return (
     <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4">
@@ -202,7 +206,7 @@ export function SimulatorPage() {
             <Database className="animate-bounce text-indigo-500" size={48} />
             <div className="font-mono text-xs tracking-widest uppercase">Repairing content object: {selfHealing}</div>
             <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} className="h-full bg-indigo-500" />
+              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} className="h-full bg-indigo-50" />
             </div>
           </motion.div>
         ) : activeItem && (

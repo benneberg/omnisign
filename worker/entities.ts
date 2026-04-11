@@ -27,7 +27,7 @@ export class DeviceEntity extends IndexedEntity<Device> {
   async addLog(event: string, level: AuditLog['level'], details?: string): Promise<void> {
     await this.mutate(s => ({
       ...s,
-      logs: [{ id: crypto.randomUUID(), timestamp: Date.now(), event, level, details }, ...s.logs].slice(0, 50)
+      logs: [{ id: crypto.randomUUID(), timestamp: Date.now(), event, level, details }, ...(s.logs || [])].slice(0, 50)
     }));
   }
   async generatePairingCode(publicKey?: string): Promise<{ code: string; expiresAt: number; challenge: string }> {
@@ -72,19 +72,22 @@ export class DeviceEntity extends IndexedEntity<Device> {
        await this.addLog("Heartbeat rejected: Missing signature", "error");
        throw new Error("Missing cryptographic signature");
     }
-    return this.mutate(s => ({
-      ...s,
-      status: data.status,
-      platform: data.platform,
-      appVersion: data.appVersion,
-      telemetry: data.telemetry,
-      lastHeartbeatAt: now,
-      metricsHistory: {
-        cpu: [...(s.metricsHistory?.cpu || []), data.telemetry.cpuUsage].slice(-20),
-        mem: [...(s.metricsHistory?.mem || []), data.telemetry.memUsage].slice(-20),
-        timestamps: [...(s.metricsHistory?.timestamps || []), now].slice(-20)
-      }
-    }));
+    return this.mutate(s => {
+      const history = s.metricsHistory || { cpu: [], mem: [], timestamps: [] };
+      return {
+        ...s,
+        status: data.status,
+        platform: data.platform,
+        appVersion: data.appVersion,
+        telemetry: data.telemetry,
+        lastHeartbeatAt: now,
+        metricsHistory: {
+          cpu: [...(history.cpu || []), data.telemetry.cpuUsage].slice(-20),
+          mem: [...(history.mem || []), data.telemetry.memUsage].slice(-20),
+          timestamps: [...(history.timestamps || []), now].slice(-20)
+        }
+      };
+    });
   }
   async assignPlaylist(playlistId: string): Promise<Device> {
     await this.addLog(`Playlist Assigned: ${playlistId}`, "info");

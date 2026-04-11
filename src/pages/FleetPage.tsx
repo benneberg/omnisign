@@ -1,14 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
-import { Monitor, RefreshCcw, Plus, ShieldCheck, Layers, Activity, Terminal, ExternalLink, Cpu, HardDrive } from 'lucide-react';
+import { Monitor, RefreshCcw, Plus, ShieldCheck, Layers, Activity, Terminal, ExternalLink, Cpu } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import type { Device, Playlist } from '@shared/types';
@@ -21,6 +20,7 @@ export function FleetPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewingDevice, setViewingDevice] = useState<Device | null>(null);
   const [pairingCode, setPairingCode] = useState('');
+  const alertedAnomalies = useRef<Set<string>>(new Set());
   const { data: devicesData, isLoading, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: () => api<{ items: Device[] }>('/v1/devices'),
@@ -30,14 +30,24 @@ export function FleetPage() {
     queryKey: ['playlists'],
     queryFn: () => api<{ items: Playlist[] }>('/v1/playlists'),
   });
-  // Watch for anomalies to toast
   useEffect(() => {
-    const anomalies = devicesData?.items.filter(d => (d.telemetry.playbackErrors?.length ?? 0) > 0);
-    anomalies?.forEach(d => {
-      toast.warning(`Watchdog Alert: ${d.name} reported playback stall`, {
-        description: "Auto-recovery protocol initiated.",
-        id: `anom-${d.id}`
-      });
+    if (!devicesData?.items) return;
+    const anomalies = devicesData.items.filter(d => (d.telemetry.playbackErrors?.length ?? 0) > 0);
+    const currentAnomalyIds = new Set(anomalies.map(d => d.id));
+    anomalies.forEach(d => {
+      if (!alertedAnomalies.current.has(d.id)) {
+        toast.warning(`Watchdog Alert: ${d.name} reported playback stall`, {
+          description: "Auto-recovery protocol initiated.",
+          id: `anom-${d.id}`
+        });
+        alertedAnomalies.current.add(d.id);
+      }
+    });
+    // Cleanup stale alerts from tracker if device no longer has errors
+    alertedAnomalies.current.forEach(id => {
+      if (!currentAnomalyIds.has(id)) {
+        alertedAnomalies.current.delete(id);
+      }
     });
   }, [devicesData]);
   const pairMutation = useMutation({
@@ -86,7 +96,10 @@ export function FleetPage() {
             <p className="text-muted-foreground mt-1 text-lg">Orchestrating {devices.length} verified execution nodes.</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="h-12 px-6 rounded-xl border-2" onClick={() => refetch()} disabled={isLoading}>
+            <Button variant="outline" className="h-12 px-6 rounded-xl border-2" onClick={() => {
+              alertedAnomalies.current.clear();
+              refetch();
+            }} disabled={isLoading}>
               <RefreshCcw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> Sync Mesh
             </Button>
             <Button className="h-12 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 shadow-primary">
@@ -106,7 +119,12 @@ export function FleetPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-12 px-6"><Checkbox checked={selectedIds.length === devices.length && devices.length > 0} onCheckedChange={() => setSelectedIds(selectedIds.length === devices.length ? [] : devices.map(d => d.id))} /></TableHead>
+                <TableHead className="w-12 px-6">
+                  <Checkbox 
+                    checked={devices.length > 0 && selectedIds.length === devices.length} 
+                    onCheckedChange={() => setSelectedIds(selectedIds.length === devices.length ? [] : devices.map(d => d.id))} 
+                  />
+                </TableHead>
                 <TableHead className="px-6 font-bold uppercase text-[10px] tracking-widest">Execution Node</TableHead>
                 <TableHead className="font-bold uppercase text-[10px] tracking-widest text-center">Security</TableHead>
                 <TableHead className="font-bold uppercase text-[10px] tracking-widest">Real-time Load</TableHead>
@@ -118,7 +136,10 @@ export function FleetPage() {
               {devices.map((device) => (
                 <TableRow key={device.id} className="group cursor-pointer hover:bg-muted/20 transition-colors" onClick={() => setViewingDevice(device)}>
                   <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox checked={selectedIds.includes(device.id)} onCheckedChange={() => setSelectedIds(prev => prev.includes(device.id) ? prev.filter(i => i !== device.id) : [...prev, device.id])} />
+                    <Checkbox 
+                      checked={selectedIds.includes(device.id)} 
+                      onCheckedChange={() => setSelectedIds(prev => prev.includes(device.id) ? prev.filter(i => i !== device.id) : [...prev, device.id])} 
+                    />
                   </TableCell>
                   <TableCell className="px-6">
                     <div className="flex items-center gap-3">
@@ -182,7 +203,7 @@ export function FleetPage() {
           </div>
         )}
       </div>
-      <Sheet open={!!viewingDevice} onOpenChange={() => setViewingDevice(null)}>
+      <Sheet open={!!viewingDevice} onOpenChange={(o) => !o && setViewingDevice(null)}>
         <SheetContent className="sm:max-w-xl overflow-y-auto border-l-2">
           {viewingDevice && (
             <div className="space-y-10 pt-6">
@@ -228,7 +249,7 @@ export function FleetPage() {
                       <XAxis dataKey="time" hide />
                       <YAxis hide domain={[0, 100]} />
                       <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
-                      <Area type="monotone" dataKey="cpu" stroke="#4338CA" fill="url(#colorPerf)" strokeWidth={3} />
+                      <Area type="monotone" dataKey="cpu" stroke="#4338CA" fill="url(#colorPerf)" strokeWidth={3} isAnimationActive={false} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -239,7 +260,12 @@ export function FleetPage() {
                     <ShieldCheck className="h-5 w-5" /> Identity Provisioning Required
                   </div>
                   <div className="flex gap-3">
-                    <Input placeholder="6-digit challenge code" className="h-12 bg-background font-black tracking-[0.5em] text-center text-xl rounded-xl border-2" value={pairingCode} onChange={(e) => setPairingCode(e.target.value)} />
+                    <Input 
+                      placeholder="6-digit challenge code" 
+                      className="h-12 bg-background font-black tracking-[0.5em] text-center text-xl rounded-xl border-2" 
+                      value={pairingCode} 
+                      onChange={(e) => setPairingCode(e.target.value)} 
+                    />
                     <Button onClick={() => pairMutation.mutate(viewingDevice.id)} disabled={pairMutation.isPending} className="h-12 px-8 rounded-xl font-bold bg-amber-600 hover:bg-amber-700">AUTHORIZE</Button>
                   </div>
                   <p className="text-[10px] text-amber-600/70 font-bold text-center uppercase">Verified Ed25519 Public Key Handshake will follow</p>

@@ -15,39 +15,46 @@ export function clearAuth(deviceId: string) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(current));
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const v1Path = path.startsWith('/v1/') ? path : path.replace('/api/', '/v1/');
+  // Determine final URL - handle health/errors separately from data routes
+  const isSystemPath = path.includes('/api/health') || path.includes('/api/client-errors');
+  const finalPath = isSystemPath ? path : (path.startsWith('/v1/') ? path : path.replace('/api/', '/v1/'));
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
-  // Robust device ID extraction for Auth headers
-  const deviceMatch = v1Path.match(/\/v1\/devices\/([^/?#\s]+)/);
-  const isRefreshEndpoint = v1Path.includes('/token/refresh');
+  const deviceMatch = finalPath.match(/\/v1\/devices\/([^/?#\s]+)/);
+  const isRefreshEndpoint = finalPath.includes('/token/refresh');
   if (deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
     const deviceId = deviceMatch[1];
-    let token = getAuth(deviceId);
-    // Conditional injection of token
+    const token = getAuth(deviceId);
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
   }
-  const res = await fetch(v1Path, { ...init, headers })
-  const json = (await res.json()) as ApiResponse<T>
-  // Automated session recovery
+  const res = await fetch(finalPath, { ...init, headers });
+  let json: ApiResponse<T>;
+  try {
+    json = await res.json();
+  } catch (e) {
+    console.error(`[API] Failed to parse JSON from ${finalPath}`, e);
+    throw new Error(`Server returned non-JSON response (${res.status})`);
+  }
+  // Handle 401 with a single retry attempt for token refresh
   if (res.status === 401 && deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
     const deviceId = deviceMatch[1];
     try {
       const refreshRes = await fetch(`/v1/devices/${deviceId}/token/refresh`, { method: 'POST' });
-      const refreshData = await refreshRes.json() as ApiResponse<{accessToken: string}>;
-      if (refreshData.success && refreshData.data) {
-        saveAuth(deviceId, refreshData.data.accessToken);
-        // Retry original request
-        return api<T>(path, init);
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json() as ApiResponse<{accessToken: string}>;
+        if (refreshData.success && refreshData.data) {
+          saveAuth(deviceId, refreshData.data.accessToken);
+          return api<T>(path, init);
+        }
       }
     } catch (e) {
-      console.error("Critical: Session recovery failed", e);
+      console.error("[API] Session recovery critical failure", e);
     }
   }
-  if (!res.ok || !json.success || json.data === undefined) {
-    throw new Error(json.error || 'Request failed')
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `Request failed with status ${res.status}`);
   }
-  return json.data
+  return json.data as T;
 }
