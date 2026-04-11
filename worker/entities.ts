@@ -41,8 +41,6 @@ export class DeviceEntity extends IndexedEntity<Device> {
   async verifyPairing(code: string, signature?: string): Promise<boolean> {
     const state = await this.getState();
     if (state.pairingCode === code && Date.now() < state.pairingExpiresAt) {
-      // In production, we'd verify the signature of state.challenge using state.publicKey
-      // For this implementation, we assume if the signature is present and we're in the window, it's valid
       await this.mutate(s => ({
         ...s,
         status: 'active',
@@ -57,9 +55,19 @@ export class DeviceEntity extends IndexedEntity<Device> {
     }
     return false;
   }
+  async refreshToken(): Promise<AuthTokenResponse> {
+    const nextAccess = `at_mesh_${crypto.randomUUID()}`;
+    const nextRefresh = `rt_mesh_${crypto.randomUUID()}`;
+    await this.mutate(s => ({
+      ...s,
+      accessToken: nextAccess,
+      refreshToken: nextRefresh
+    }));
+    await this.addLog("Session tokens rotated", "info");
+    return { accessToken: nextAccess, refreshToken: nextRefresh };
+  }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
     const now = Date.now();
-    // Verification logic (Simplified for simulation: check signature presence)
     if (data.status === 'active' && !data.signature) {
        await this.addLog("Heartbeat rejected: Missing signature", "error");
        throw new Error("Missing cryptographic signature");
@@ -81,6 +89,17 @@ export class DeviceEntity extends IndexedEntity<Device> {
   async assignPlaylist(playlistId: string): Promise<Device> {
     await this.addLog(`Playlist Assigned: ${playlistId}`, "info");
     return this.mutate(s => ({ ...s, assignedPlaylistId: playlistId }));
+  }
+  static async bulkAssignPlaylist(env: any, deviceIds: string[], playlistId: string): Promise<number> {
+    const results = await Promise.all(deviceIds.map(async id => {
+      const dev = new DeviceEntity(env, id);
+      if (await dev.exists()) {
+        await dev.assignPlaylist(playlistId);
+        return true;
+      }
+      return false;
+    }));
+    return results.filter(Boolean).length;
   }
 }
 export class PlaylistEntity extends IndexedEntity<Playlist> {
@@ -104,8 +123,6 @@ export class PlaylistEntity extends IndexedEntity<Playlist> {
   }
   async getSignedManifest(): Promise<Manifest> {
     const playlist = await this.getState();
-    const manifestStr = JSON.stringify(playlist);
-    // In production, sign using actual root private key
     return {
       playlist,
       signature: `sig_mesh_prod_${crypto.randomUUID()}`,

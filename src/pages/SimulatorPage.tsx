@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, saveAuth } from '@/lib/api-client';
 import { generateDeviceKeypair, exportKey, importKey, signData, computeHash } from '@/lib/crypto-utils';
 import type { Playlist, PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
-import { Activity, ShieldCheck, RefreshCw, HardDrive, Key, QrCode, AlertTriangle, Loader2, Cpu, Database } from 'lucide-react';
+import { Activity, ShieldCheck, RefreshCw, Key, QrCode, AlertTriangle, Database, Terminal, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 const DB_NAME = "ScreenMeshDB";
 const STORE_NAME = "Persistence";
 export function SimulatorPage() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [deviceState, setDeviceState] = useState<Device | null>(null);
@@ -24,7 +25,6 @@ export function SimulatorPage() {
     isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
-  // IndexedDB persistence helper
   const getStored = async (key: string) => {
     return new Promise((resolve) => {
       const req = indexedDB.open(DB_NAME, 1);
@@ -45,14 +45,12 @@ export function SimulatorPage() {
       tx.objectStore(STORE_NAME).put(val, key);
     };
   };
-  // Initial Boot with Cryptographic Identity
   useEffect(() => {
     const boot = async () => {
       try {
         let pubBase64 = await getStored("publicKey") as string;
         let privKey = await getStored("privateKey") as CryptoKey;
         if (!pubBase64 || !privKey) {
-          console.log("Generating fresh identity...");
           const kp = await generateDeviceKeypair();
           pubBase64 = await exportKey(kp.publicKey);
           privKey = kp.privateKey;
@@ -64,11 +62,7 @@ export function SimulatorPage() {
         if (!dev || dev.status === 'new' || dev.status === 'pairing') {
           const init = await api<DeviceInitResponse>(`/v1/devices/init`, {
             method: 'POST',
-            body: JSON.stringify({ 
-              platform: 'ScreenMesh-OS', 
-              appVersion: '3.0.0-PROD', 
-              publicKey: pubBase64 
-            })
+            body: JSON.stringify({ platform: 'ScreenMesh-OS', appVersion: '3.1.0-RC', publicKey: pubBase64 })
           });
           if (isMounted.current) setPairingInfo(init);
         } else {
@@ -82,12 +76,15 @@ export function SimulatorPage() {
     };
     boot();
   }, [id]);
-  const { data: manifest } = useQuery({
+  const { data: manifest, refetch: forceSync } = useQuery({
     queryKey: ['simulator-playlist', id],
     queryFn: async () => {
       setIsUpdating(true);
       try {
         const data = await api<Manifest>(`/v1/devices/${id}/playlist`);
+        if (manifest?.playlist?.id !== data.playlist.id) {
+          setCurrentIndex(0); // Reset on playlist change
+        }
         await setStored(`manifest_${id}`, data);
         return data;
       } finally {
@@ -97,7 +94,6 @@ export function SimulatorPage() {
     enabled: deviceState?.status === 'active',
     refetchInterval: 30000,
   });
-  // Heartbeat Loop with Real Metrics & Signature
   useEffect(() => {
     if (isBooting || !keys) return;
     const hb = setInterval(async () => {
@@ -108,7 +104,7 @@ export function SimulatorPage() {
         const heartbeatPayload = {
           status: deviceState?.status || 'pairing',
           platform: 'ScreenMesh-OS',
-          appVersion: '3.0.0-PROD',
+          appVersion: '3.1.0-RC',
           telemetry: {
             cpuUsage: Math.floor(Math.random() * 10) + 2,
             memUsage: mem ? Math.round((mem / totalMem) * 100) : 25,
@@ -135,19 +131,17 @@ export function SimulatorPage() {
     }, 10000);
     return () => clearInterval(hb);
   }, [id, deviceState, isBooting, keys]);
-  // Watchdog & Real Content Integrity
   useEffect(() => {
     if (!manifest?.playlist?.items.length) return;
     const item = manifest.playlist.items[currentIndex];
     const verifyIntegrity = async () => {
-      // Simulation: Real compute hash of item URL (using text as blob proxy)
       const realHash = await computeHash(item.url + item.durationMs);
-      const isCorrupt = Math.random() < 0.02; // 2% chance for self-healing demo
+      const isCorrupt = Math.random() < 0.01;
       const status = isCorrupt ? false : (item.integrity === 'pending' || item.integrity === realHash);
       setCache(prev => {
         const exists = prev.find(c => c.hash === item.id);
         if (exists) return prev;
-        return [{ hash: item.id, integrity: status }, ...prev].slice(0, 10);
+        return [{ hash: item.id, integrity: status }, ...prev].slice(0, 5);
       });
       if (!status) {
         setSelfHealing(item.id);
@@ -155,18 +149,17 @@ export function SimulatorPage() {
           setCache(prev => prev.map(c => c.hash === item.id ? { ...c, integrity: true } : c));
           setSelfHealing(null);
           toast.success("Integrity Auto-Restored: Hash Validated");
-        }, 2500);
+        }, 2000);
       }
     };
     verifyIntegrity();
-    // Watchdog: monitor for stall via RAF
     let lastFrame = performance.now();
     let watchdogActive = true;
     const monitor = () => {
       const now = performance.now();
-      if (now - lastFrame > 1000 && watchdogActive) {
-        toast.error("WATCHDOG: FRAME STALL DETECTED");
-        setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
+      if (now - lastFrame > 1500 && watchdogActive) {
+        toast.error("WATCHDOG: ENGINE STALL. INITIATING SYNC.");
+        forceSync();
         watchdogActive = false;
       }
       lastFrame = now;
@@ -178,12 +171,11 @@ export function SimulatorPage() {
       if (isMounted.current) setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
     }, item.durationMs);
     return () => { clearTimeout(timer); watchdogActive = false; cancelAnimationFrame(rafId); };
-  }, [manifest, currentIndex]);
+  }, [manifest, currentIndex, forceSync]);
   if (isBooting) return (
     <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4">
       <RefreshCw className="animate-spin opacity-50" size={48} />
-      <div className="text-xl tracking-widest animate-pulse font-bold">BOOTING_CORE_MESH_OS_v3</div>
-      <div className="text-[10px] opacity-40 uppercase">Decrypting Root Key... Success</div>
+      <div className="text-xl tracking-widest animate-pulse font-bold uppercase">ScreenMesh Bootstrapping...</div>
     </div>
   );
   if (!deviceState || deviceState.status === 'pairing') return (
@@ -191,30 +183,26 @@ export function SimulatorPage() {
       <div className="max-w-md w-full bg-slate-900/50 border border-slate-800 p-10 rounded-3xl text-center space-y-8 backdrop-blur-2xl shadow-2xl">
         <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-glow rotate-3"><Key size={40} /></div>
         <div className="space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight">Node Registration</h2>
-          <p className="text-zinc-400 text-sm">Waiting for CMS Pairing. Cryptographic identity established.</p>
+          <h2 className="text-2xl font-bold tracking-tight">Provisioning Mode</h2>
+          <p className="text-zinc-400 text-sm">Challenge pending. Identity established.</p>
         </div>
         <div className="p-8 bg-white text-black rounded-3xl mx-auto w-fit shadow-2xl border-8 border-indigo-500/20">
           <QrCode size={160} className="opacity-90" />
           <div className="mt-4 text-4xl font-black tracking-[0.4em] font-mono">{pairingInfo?.pairingCode || '------'}</div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-mono">ID: {id}</div>
-          <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-mono truncate px-4">PUB: {keys?.pub}</div>
         </div>
       </div>
     </div>
   );
   const activeItem = manifest?.playlist.items[currentIndex];
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden relative select-none cursor-none">
+    <div className="w-screen h-screen bg-black overflow-hidden relative select-none">
       <AnimatePresence mode="wait">
         {selfHealing ? (
-          <motion.div key="healing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center text-white space-y-6">
+          <motion.div key="healing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center text-white space-y-4">
             <Database className="animate-bounce text-indigo-500" size={48} />
-            <div className="font-mono text-sm tracking-widest uppercase">Self-Healing Integrity Error: {selfHealing}</div>
-            <div className="w-64 h-2 bg-white/5 rounded-full overflow-hidden border border-white/10">
-              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2.5 }} className="h-full bg-indigo-500" />
+            <div className="font-mono text-xs tracking-widest uppercase">Repairing content object: {selfHealing}</div>
+            <div className="w-48 h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 2 }} className="h-full bg-indigo-500" />
             </div>
           </motion.div>
         ) : activeItem && (
@@ -226,49 +214,35 @@ export function SimulatorPage() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="absolute top-8 right-8 p-6 bg-slate-950/80 backdrop-blur-xl border border-white/10 text-white font-mono text-[10px] rounded-2xl w-[320px] shadow-2xl space-y-5">
+      <div className="absolute bottom-8 right-8 p-6 bg-slate-950/90 backdrop-blur-2xl border border-white/10 text-white font-mono text-[10px] rounded-2xl w-[320px] shadow-2xl space-y-4">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
-          <span className="flex items-center gap-2 font-black text-indigo-400 italic">SCREENMESH PROD</span>
-          <span className="text-emerald-500 flex items-center gap-1 font-bold"><ShieldCheck size={10}/> SECURE</span>
+          <span className="font-black text-indigo-400">ENGINE_OMNI_PROD</span>
+          <button onClick={() => forceSync()} className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1.5 font-bold uppercase">
+            <RefreshCw size={10} className={isUpdating ? 'animate-spin' : ''} /> Force Sync
+          </button>
         </div>
-        <div className="grid grid-cols-2 gap-y-2">
-          <span className="text-zinc-500 uppercase">Engine Status</span>
-          <span className="text-right text-emerald-400 font-bold">NOMINAL</span>
-          <span className="text-zinc-500 uppercase">Frame Time</span>
-          <span className="text-right text-zinc-300">16.6ms</span>
-          <span className="text-zinc-500 uppercase">Cores / Heap</span>
-          <span className="text-right text-zinc-300">{navigator.hardwareConcurrency || 8} / {deviceState.telemetry.memoryLimit || 4096}MB</span>
+        <div className="grid grid-cols-2 gap-y-1 opacity-80 uppercase tracking-tighter">
+          <span>Heap Memory</span>
+          <span className="text-right text-indigo-400 font-bold">{deviceState.telemetry.memUsage}%</span>
+          <span>Core Temp</span>
+          <span className="text-right text-emerald-400 font-bold">42°C</span>
+          <span>Manifest</span>
+          <span className="text-right text-zinc-300">REV_{manifest?.playlist.version || 0}</span>
         </div>
-        <div className="space-y-3">
-          <div className="text-zinc-500 uppercase font-bold text-[8px] flex items-center justify-between tracking-tighter">
-            <span>Signed Content Stack</span>
-            <Database size={10} />
+        <div className="pt-2 border-t border-white/5">
+          <div className="flex justify-between text-[8px] text-zinc-500 font-bold uppercase mb-2">
+            <span>Cache Status</span>
+            <ShieldCheck size={10} className="text-emerald-500" />
           </div>
-          <div className="space-y-1.5">
-            {cache.slice(0, 3).map(c => (
-              <div key={c.hash} className="flex justify-between items-center bg-white/5 p-2 rounded-lg border border-white/5">
-                <span className="text-zinc-400 truncate w-32 uppercase tracking-tighter">OBJ_{c.hash.slice(0,8)}</span>
-                {c.integrity ? <ShieldCheck size={10} className="text-emerald-500" /> : <AlertTriangle size={10} className="text-rose-500 animate-pulse" />}
+          <div className="space-y-1">
+            {cache.map(c => (
+              <div key={c.hash} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded">
+                <span className="text-zinc-400 truncate w-32">OBJ_{c.hash.slice(0,8)}</span>
+                {c.integrity ? <div className="w-1 h-1 bg-emerald-500 rounded-full" /> : <div className="w-1 h-1 bg-rose-500 animate-ping rounded-full" />}
               </div>
             ))}
           </div>
         </div>
-        {activeItem && !selfHealing && (
-          <div className="space-y-2 pt-2 border-t border-white/5">
-            <div className="flex justify-between text-[8px] text-zinc-500 font-bold">
-              <span>MANIFEST REVISION</span>
-              <span className="text-indigo-400">v{manifest?.playlist.version}</span>
-            </div>
-            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <motion.div
-                key={`p-${activeItem.id}`}
-                className="h-full bg-indigo-500 shadow-primary"
-                initial={{ width: 0 }} animate={{ width: '100%' }}
-                transition={{ duration: activeItem.durationMs / 1000, ease: "linear" }}
-              />
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

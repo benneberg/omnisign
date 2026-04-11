@@ -38,6 +38,20 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     if (!success) return bad(c, 'Invalid or expired pairing code');
     return ok(c, await dev.getState());
   });
+  app.post('/v1/devices/:id/token/refresh', async (c) => {
+    const dev = new DeviceEntity(c.env, c.req.param('id'));
+    if (!await dev.exists()) return notFound(c);
+    const tokens = await dev.refreshToken();
+    return ok(c, tokens);
+  });
+  app.post('/v1/devices/bulk/assign', async (c) => {
+    const { deviceIds, playlistId } = await c.req.json<{ deviceIds: string[], playlistId: string }>();
+    if (!Array.isArray(deviceIds) || !isStr(playlistId)) return bad(c, 'Invalid bulk parameters');
+    const pl = new PlaylistEntity(c.env, playlistId);
+    if (!await pl.exists()) return bad(c, 'Target playlist does not exist');
+    const count = await DeviceEntity.bulkAssignPlaylist(c.env, deviceIds, playlistId);
+    return ok(c, { assignedCount: count });
+  });
   app.post('/v1/devices/:id/heartbeat', async (c) => {
     const body = await c.req.json<DeviceHeartbeat>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
