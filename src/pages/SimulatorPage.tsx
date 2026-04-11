@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, saveAuth } from '@/lib/api-client';
 import type { Playlist, PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
-import { Activity, ShieldCheck, Database, ServerCrash, RefreshCw, Cpu, HardDrive, Key, QrCode, AlertTriangle } from 'lucide-react';
+import { Activity, ShieldCheck, RefreshCw, HardDrive, Key, QrCode, AlertTriangle, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 export function SimulatorPage() {
@@ -14,6 +14,12 @@ export function SimulatorPage() {
   const [pairingInfo, setPairingInfo] = useState<DeviceInitResponse | null>(null);
   const [cache, setCache] = useState<{hash: string, integrity: boolean}[]>([]);
   const [isBooting, setIsBooting] = useState(true);
+  const [selfHealing, setSelfHealing] = useState<string | null>(null);
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
   // Initial Boot/Check Flow
   useEffect(() => {
     const boot = async () => {
@@ -24,33 +30,35 @@ export function SimulatorPage() {
             method: 'POST',
             body: JSON.stringify({ platform: 'SimulatorMesh', appVersion: '2.4.0', publicKey: 'mock-pub-key' })
           });
-          setPairingInfo(init);
+          if (isMounted.current) setPairingInfo(init);
         } else {
-          setDeviceState(dev);
+          if (isMounted.current) setDeviceState(dev);
         }
       } catch (e) {
         console.error("Boot error", e);
       } finally {
-        setTimeout(() => setIsBooting(false), 2000);
+        setTimeout(() => {
+          if (isMounted.current) setIsBooting(false);
+        }, 2000);
       }
     };
     boot();
   }, [id]);
-  const { data: manifest, error } = useQuery({
+  const { data: manifest } = useQuery({
     queryKey: ['simulator-playlist', id],
     queryFn: async () => {
       setIsUpdating(true);
       try {
         const data = await api<Manifest>(`/v1/devices/${id}/playlist`);
-        // Simulate caching
         data.playlist.items.forEach(item => {
-          if (!cache.find(c => c.hash === item.checksum)) {
-            setCache(prev => [{ hash: item.checksum, integrity: Math.random() > 0.1 }, ...prev].slice(0, 10));
-          }
+          setCache(prev => {
+            if (prev.find(c => c.hash === item.checksum)) return prev;
+            return [{ hash: item.checksum, integrity: Math.random() > 0.05 }, ...prev].slice(0, 10);
+          });
         });
         return data;
       } finally {
-        setTimeout(() => setIsUpdating(false), 1500);
+        if (isMounted.current) setIsUpdating(false);
       }
     },
     enabled: deviceState?.status === 'active',
@@ -73,12 +81,16 @@ export function SimulatorPage() {
             }
           })
         });
-        if (updated.status === 'active' && deviceState?.status !== 'active') {
-          if (updated.accessToken) saveAuth(id!, updated.accessToken);
-          setDeviceState(updated);
-          toast.success("Identity Verified: Node Authorized");
+        if (isMounted.current) {
+          if (updated.status === 'active' && deviceState?.status !== 'active') {
+            if (updated.accessToken) saveAuth(id!, updated.accessToken);
+            setDeviceState(updated);
+            toast.success("Identity Verified: Node Authorized");
+          }
         }
-      </div> catch (e) { /* silent fail */ }
+      } catch (e) {
+        console.warn("Heartbeat lost", e);
+      }
     }, 10000);
     return () => clearInterval(hb);
   }, [id, deviceState, isBooting]);
@@ -86,16 +98,26 @@ export function SimulatorPage() {
   useEffect(() => {
     if (!manifest?.playlist?.items.length) return;
     const item = manifest.playlist.items[currentIndex];
-    // Watchdog trigger simulation
+    // Check integrity
+    const cacheEntry = cache.find(c => c.hash === item.checksum);
+    if (cacheEntry && !cacheEntry.integrity) {
+      setSelfHealing(item.checksum);
+      const repairTimer = setTimeout(() => {
+        setCache(prev => prev.map(c => c.hash === item.checksum ? { ...c, integrity: true } : c));
+        setSelfHealing(null);
+        toast.success("Integrity Restored");
+      }, 3000);
+      return () => clearTimeout(repairTimer);
+    }
     const watchdog = setTimeout(() => {
       toast.error("Watchdog: Frame Stall. Recovering...");
-      setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
+      if (isMounted.current) setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
     }, item.durationMs + 4000);
     const timer = setTimeout(() => {
-      setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
+      if (isMounted.current) setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
     }, item.durationMs);
     return () => { clearTimeout(timer); clearTimeout(watchdog); };
-  }, [manifest, currentIndex]);
+  }, [manifest, currentIndex, cache]);
   if (isBooting) return (
     <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4">
       <RefreshCw className="animate-spin opacity-50" size={48} />
@@ -103,18 +125,20 @@ export function SimulatorPage() {
     </div>
   );
   if (!deviceState || deviceState.status === 'pairing') return (
-    <div className="w-screen h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white p-12">
-      <div className="max-w-md w-full bg-white/5 border border-white/10 p-10 rounded-3xl text-center space-y-8 backdrop-blur-xl">
-        <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center shadow-glow"><Key size={40} /></div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold">Waiting for Orchestration</h2>
-          <p className="text-zinc-400 text-sm">Hardware ready. Provisioning required via OmniSign CMS.</p>
+    <div className="w-screen h-screen bg-[#0F172A] flex flex-col items-center justify-center text-white px-4 py-8">
+      <div className="max-w-7xl mx-auto w-full flex items-center justify-center">
+        <div className="max-w-md w-full bg-white/5 border border-white/10 p-10 rounded-3xl text-center space-y-8 backdrop-blur-xl">
+          <div className="mx-auto w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center shadow-glow"><Key size={40} /></div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold">Waiting for Orchestration</h2>
+            <p className="text-zinc-400 text-sm">Hardware ready. Provisioning required via OmniSign CMS.</p>
+          </div>
+          <div className="p-8 bg-white text-black rounded-2xl mx-auto w-fit shadow-2xl">
+            <QrCode size={160} />
+            <div className="mt-4 text-3xl font-black tracking-[0.4em]">{pairingInfo?.pairingCode || '------'}</div>
+          </div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono">Device ID: {id}</div>
         </div>
-        <div className="p-8 bg-white text-black rounded-2xl mx-auto w-fit shadow-2xl">
-          <QrCode size={160} />
-          <div className="mt-4 text-3xl font-black tracking-[0.4em]">{pairingInfo?.pairingCode || '------'}</div>
-        </div>
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono">Device ID: {id}</div>
       </div>
     </div>
   );
@@ -122,7 +146,19 @@ export function SimulatorPage() {
   return (
     <div className="w-screen h-screen bg-black overflow-hidden relative select-none">
       <AnimatePresence mode="wait">
-        {activeItem && (
+        {selfHealing ? (
+          <motion.div 
+            key="healing"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center text-white space-y-4"
+          >
+            <Loader2 className="animate-spin text-indigo-500" size={48} />
+            <div className="font-mono text-sm tracking-widest uppercase">Repairing Integrity: {selfHealing}</div>
+            <div className="w-64 h-1 bg-white/10 rounded-full overflow-hidden">
+              <motion.div initial={{ width: 0 }} animate={{ width: '100%' }} transition={{ duration: 3 }} className="h-full bg-indigo-500" />
+            </div>
+          </motion.div>
+        ) : activeItem && (
           <motion.div
             key={activeItem.id}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -132,7 +168,7 @@ export function SimulatorPage() {
             {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" />}
             {activeItem.type === 'video' && <video src={activeItem.url} autoPlay muted loop className="w-full h-full object-cover" />}
             {activeItem.type === 'html' && <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: activeItem.htmlContent || '' }} />}
-            {activeItem.type === 'url' && <iframe src={activeItem.url} className="w-full h-full border-0" />}
+            {activeItem.type === 'url' && <iframe src={activeItem.url} title="content" className="w-full h-full border-0" />}
           </motion.div>
         )}
       </AnimatePresence>
@@ -156,12 +192,12 @@ export function SimulatorPage() {
             {cache.slice(0, 4).map(c => (
               <div key={c.hash} className="flex justify-between items-center bg-white/5 p-1 px-2 rounded">
                 <span className="text-zinc-400 uppercase">{c.hash}</span>
-                {c.integrity ? <ShieldCheck size={10} className="text-emerald-500" /> : <AlertTriangle size={10} className="text-rose-500" />}
+                {c.integrity ? <ShieldCheck size={10} className="text-emerald-500" /> : <AlertTriangle size={10} className="text-rose-500 animate-pulse" />}
               </div>
             ))}
           </div>
         </div>
-        {activeItem && (
+        {activeItem && !selfHealing && (
           <div className="space-y-1.5 pt-2">
             <div className="flex justify-between text-[8px] text-zinc-500">
               <span>ACTIVE_MANIFEST_VERSION</span>

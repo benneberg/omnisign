@@ -1,5 +1,5 @@
 import { IndexedEntity } from "./core-utils";
-import type { Device, Playlist, DeviceHeartbeat, Manifest } from "@shared/types";
+import type { Device, Playlist, DeviceHeartbeat, Manifest, AuditLog } from "@shared/types";
 import { MOCK_DEVICES, MOCK_PLAYLISTS } from "@shared/mock-data";
 export class DeviceEntity extends IndexedEntity<Device> {
   static readonly entityName = "device";
@@ -13,6 +13,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
     appVersion: "0.0.0",
     lastHeartbeatAt: 0,
     pairingExpiresAt: 0,
+    logs: [],
+    metricsHistory: { cpu: [], mem: [], timestamps: [] },
     telemetry: {
       cpuUsage: 0,
       memUsage: 0,
@@ -21,11 +23,22 @@ export class DeviceEntity extends IndexedEntity<Device> {
       playbackErrors: []
     }
   };
-  static seedData = MOCK_DEVICES;
+  static seedData = MOCK_DEVICES.map(d => ({
+    ...d,
+    logs: [{ id: "l1", timestamp: Date.now(), event: "Entity Seeded", level: 'info' }],
+    metricsHistory: { cpu: [10, 12, 8, 15], mem: [30, 31, 29, 32], timestamps: [Date.now()] }
+  })) as any;
+  async addLog(event: string, level: AuditLog['level'], details?: string): Promise<void> {
+    await this.mutate(s => ({
+      ...s,
+      logs: [{ id: crypto.randomUUID(), timestamp: Date.now(), event, level, details }, ...s.logs].slice(0, 50)
+    }));
+  }
   async generatePairingCode(publicKey?: string): Promise<{ code: string; expiresAt: number }> {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 600000; // 10 mins
+    const expiresAt = Date.now() + 600000;
     await this.mutate(s => ({ ...s, pairingCode: code, pairingExpiresAt: expiresAt, status: 'pairing', publicKey }));
+    await this.addLog("Pairing challenge generated", "info");
     return { code, expiresAt };
   }
   async verifyPairing(code: string): Promise<boolean> {
@@ -39,27 +52,29 @@ export class DeviceEntity extends IndexedEntity<Device> {
         accessToken: `at_mesh_${crypto.randomUUID()}`,
         refreshToken: `rt_mesh_${crypto.randomUUID()}`
       }));
+      await this.addLog("Device paired successfully", "info", "Authorized via 6-digit challenge");
       return true;
     }
     return false;
   }
-  async refreshToken(): Promise<{ accessToken: string; refreshToken: string }> {
-    const at = `at_mesh_${crypto.randomUUID()}`;
-    const rt = `rt_mesh_${crypto.randomUUID()}`;
-    await this.mutate(s => ({ ...s, accessToken: at, refreshToken: rt }));
-    return { accessToken: at, refreshToken: rt };
-  }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
+    const now = Date.now();
     return this.mutate(s => ({
       ...s,
       status: data.status,
       platform: data.platform,
       appVersion: data.appVersion,
       telemetry: data.telemetry,
-      lastHeartbeatAt: Date.now()
+      lastHeartbeatAt: now,
+      metricsHistory: {
+        cpu: [...s.metricsHistory.cpu, data.telemetry.cpuUsage].slice(-20),
+        mem: [...s.metricsHistory.mem, data.telemetry.memUsage].slice(-20),
+        timestamps: [...s.metricsHistory.timestamps, now].slice(-20)
+      }
     }));
   }
   async assignPlaylist(playlistId: string): Promise<Device> {
+    await this.addLog(`Playlist Assigned: ${playlistId}`, "info");
     return this.mutate(s => ({ ...s, assignedPlaylistId: playlistId }));
   }
 }

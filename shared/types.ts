@@ -4,6 +4,13 @@ export interface ApiResponse<T = unknown> {
   error?: string;
 }
 export type DeviceStatus = 'active' | 'offline' | 'pairing' | 'new';
+export interface AuditLog {
+  id: string;
+  timestamp: number;
+  event: string;
+  level: 'info' | 'warn' | 'error';
+  details?: string;
+}
 export interface Device {
   id: string;
   orgId: string;
@@ -18,6 +25,12 @@ export interface Device {
   publicKey?: string;
   accessToken?: string;
   refreshToken?: string;
+  logs: AuditLog[];
+  metricsHistory: {
+    cpu: number[];
+    mem: number[];
+    timestamps: number[];
+  };
   telemetry: {
     cpuUsage: number;
     memUsage: number;

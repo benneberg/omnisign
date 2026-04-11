@@ -18,10 +18,23 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const v1Path = path.startsWith('/v1/') ? path : path.replace('/api/', '/v1/');
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
-  // Attempt to find a deviceId in the path for auth simulation
-  const deviceMatch = v1Path.match(/\/devices\/([^\/]+)/);
+  const deviceMatch = v1Path.match(/\/devices\/([^/]+)/);
   if (deviceMatch && deviceMatch[1]) {
-    const token = getAuth(deviceMatch[1]);
+    const deviceId = deviceMatch[1];
+    let token = getAuth(deviceId);
+    // Simulated refresh logic
+    if (token && token.includes('_stale')) {
+      try {
+        const refreshRes = await fetch(`/v1/devices/${deviceId}/token/refresh`, { method: 'POST' });
+        const refreshData = await refreshRes.json() as ApiResponse<{accessToken: string}>;
+        if (refreshData.success && refreshData.data) {
+          token = refreshData.data.accessToken;
+          saveAuth(deviceId, token);
+        }
+      } catch (e) {
+        console.error("Token refresh failed", e);
+      }
+    }
     if (token) headers.set('Authorization', `Bearer ${token}`);
   }
   const res = await fetch(v1Path, { ...init, headers })
