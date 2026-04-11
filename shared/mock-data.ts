@@ -40,7 +40,6 @@ export const MOCK_DEVICES: Device[] = [
     appVersion: '3.0.0-PROD',
     publicKey: ROOT_PUB_KEY,
     lastHeartbeatAt: now - 30000,
-    expectedNonceSignature: 'expected-nonce-sig-123',
     assignedPlaylistId: 'p-1',
     logs: [{ id: 'l-init-1', timestamp: now - 3600000, event: 'Node Cold Boot', level: 'info' }],
     metricsHistory: generateMetrics(),

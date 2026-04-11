@@ -27,11 +27,13 @@ export function SimulatorPage() {
   const getStored = async (key: string) => {
     return new Promise((resolve) => {
       const req = indexedDB.open(DB_NAME, 1);
+      req.onerror = () => resolve(null);
       req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME); };
       req.onsuccess = () => {
         const tx = req.result.transaction(STORE_NAME, "readonly");
         const get = tx.objectStore(STORE_NAME).get(key);
         get.onsuccess = () => resolve(get.result);
+        get.onerror = () => resolve(null);
       };
     });
   };
@@ -85,7 +87,7 @@ export function SimulatorPage() {
       }
     };
     boot();
-    return () => cancelAnimationFrame(rafRef.current);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [id, startWatchdog]);
   const { data: manifest, refetch: forceSync } = useQuery({
     queryKey: ['simulator-playlist', id],
@@ -139,10 +141,10 @@ export function SimulatorPage() {
       }
     }, 15000);
     return () => clearInterval(hb);
-  }, [id, deviceState?.id, isBooting, keys, watchdogMetrics.stalls]);
+  }, [id, deviceState?.id, deviceState?.expectedNonce, isBooting, keys, watchdogMetrics.stalls]);
   // Read-Verify-Repair Integrity Check
   useEffect(() => {
-    if (!manifest?.playlist?.items.length) return;
+    if (!manifest?.playlist?.items?.[currentIndex]) return;
     const item = manifest.playlist.items[currentIndex];
     const verify = async () => {
       setIntegrityQueue(prev => [...prev, item.id]);
@@ -205,9 +207,9 @@ export function SimulatorPage() {
               onClick={async () => {
                 try {
                   const sig = await signData(keys.priv, `${pairingInfo.pairingCode}${pairingInfo.challenge || ''}`);
-                  const result = await api(`/v1/devices/${id}/pair`, {
+                  const result = await api<Device>(`/v1/devices/${id}/pair`, {
                     method: 'POST',
-                    body: JSON.stringify({ code: pairingInfo.pairingCode, signature: sig })
+                    body: JSON.stringify({ deviceId: id, pairingCode: pairingInfo.pairingCode, signature: sig })
                   });
                   setPairingInfo(null);
                   setDeviceState(result);
