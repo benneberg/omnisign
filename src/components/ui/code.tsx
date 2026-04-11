@@ -3,8 +3,8 @@ import { Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { toast } from "sonner"
-import React from "react"
-type CodeProps = React.HTMLAttributes<HTMLElement>;
+import type React from "react"
+interface CodeProps extends React.HTMLAttributes<HTMLCodeElement> {}
 export function Code({ className, ...props }: CodeProps) {
   return (
     <code
