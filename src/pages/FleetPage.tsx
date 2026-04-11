@@ -1,20 +1,45 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MoreHorizontal, Monitor, ExternalLink, RefreshCcw } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
-import type { Device } from '@shared/types';
+import type { Device, Playlist } from '@shared/types';
 import { formatDistanceToNow } from 'date-fns';
 export function FleetPage() {
   const { data: devicesData, isLoading, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: () => api<{ items: Device[] }>('/api/devices'),
   });
+  const { data: playlistsData } = useQuery({
+    queryKey: ['playlists'],
+    queryFn: () => api<{ items: Playlist[] }>('/api/playlists'),
+  });
+  const playlists = playlistsData?.items ?? [];
   const devices = devicesData?.items ?? [];
+
+  const [openAssign, setOpenAssign] = useState(false);
+  const [assignDeviceId, setAssignDeviceId] = useState('');
+  const queryClient = useQueryClient();
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
+
+  const assignMutation = useMutation({
+    mutationFn: (playlistId: string) => api(`/api/devices/${assignDeviceId}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ playlistId })
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      setOpenAssign(false);
+      setAssignDeviceId('');
+      setSelectedPlaylistId('');
+    },
+  });
   return (
     <AppLayout container>
       <div className="space-y-8">
@@ -86,6 +111,10 @@ export function FleetPage() {
                           </a>
                         </DropdownMenuItem>
                         <DropdownMenuItem>View Details</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {
+                          setAssignDeviceId(device.id);
+                          setOpenAssign(true);
+                        }}>Assign Playlist</DropdownMenuItem>
                         <DropdownMenuItem className="text-rose-600">Decommission</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -95,6 +124,46 @@ export function FleetPage() {
             </TableBody>
           </Table>
         </div>
+
+        <Dialog open={openAssign} onOpenChange={(o) => {
+          setOpenAssign(o);
+          if (!o) {
+            setAssignDeviceId('');
+            setSelectedPlaylistId('');
+          }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Assign Playlist</DialogTitle>
+              <DialogDescription>
+                Choose a playlist for <strong>{devicesData?.items.find(d => d.id === assignDeviceId)?.name ?? 'Device'}</strong>
+              </DialogDescription>
+            </DialogHeader>
+            <Select value={selectedPlaylistId} onValueChange={setSelectedPlaylistId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a playlist" />
+              </SelectTrigger>
+              <SelectContent>
+                {playlists.map((playlist) => (
+                  <SelectItem key={playlist.id} value={playlist.id}>
+                    {playlist.name} ({playlist.items.length} items)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setOpenAssign(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={() => assignMutation.mutate(selectedPlaylistId)} 
+                disabled={!selectedPlaylistId || assignMutation.isPending}
+              >
+                {assignMutation.isPending ? 'Assigning...' : 'Assign'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

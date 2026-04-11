@@ -26,11 +26,10 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
         id,
         orgId: 'org-1',
         name: `Device ${id.slice(0,4)}`,
-        status: data.status,
-        platform: 'WebPlayer',
-        appVersion: '1.0.0',
-        lastHeartbeatAt: Date.now(),
-        telemetry: data.telemetry
+        status: 'active' as const,
+        platform: data.platform ?? 'WebPlayer',
+        appVersion: data.appVersion ?? '1.0.0',
+        lastHeartbeatAt: Date.now()
       });
       return ok(c, newDev);
     }
@@ -55,5 +54,17 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const pl = new PlaylistEntity(c.env, state.assignedPlaylistId);
     if (!await pl.exists()) return notFound(c, 'assigned playlist missing');
     return ok(c, await pl.getState());
+  });
+
+  app.post('/api/devices/:id/assign', async (c) => {
+    const playlistId = await c.req.json<{playlistId: string}>().then(d => d.playlistId);
+    if (!isStr(playlistId)) return bad(c, 'Valid playlistId required');
+    const pl = new PlaylistEntity(c.env, playlistId);
+    if (!await pl.exists()) return bad(c, 'Playlist not found');
+    const id = c.req.param('id');
+    const dev = new DeviceEntity(c.env, id);
+    if (!await dev.exists()) return notFound(c, 'Device not found');
+    const updated = await dev.assignPlaylist(playlistId);
+    return ok(c, updated);
   });
 }
