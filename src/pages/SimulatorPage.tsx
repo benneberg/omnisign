@@ -114,20 +114,21 @@ export function SimulatorPage() {
   // Anti-Spoof Heartbeat Loop
   useEffect(() => {
     if (isBooting || !keys || !deviceState) return;
+    const currentDeviceState = deviceState; // Snapshot to prevent stale closure
     const hb = setInterval(async () => {
       try {
         const heartbeatPayload = {
-          status: deviceState.status,
+          status: currentDeviceState.status,
           platform: 'ScreenMesh-OS',
           appVersion: '3.1.0-STABLE',
           telemetry: {
-            ...(deviceState.telemetry || {}),
+            ...(currentDeviceState.telemetry || {}),
             uptimeSeconds: Math.floor(performance.now() / 1000),
             playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
           }
         };
-        const heartbeatPayloadWithSig = deviceState.expectedNonce 
-          ? { ...heartbeatPayload, signature: await signData(keys.priv, deviceState.expectedNonce) }
+        const heartbeatPayloadWithSig = currentDeviceState.expectedNonce
+          ? { ...heartbeatPayload, signature: await signData(keys.priv, currentDeviceState.expectedNonce) }
           : heartbeatPayload;
 
         const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
@@ -141,7 +142,7 @@ export function SimulatorPage() {
       }
     }, 15000);
     return () => clearInterval(hb);
-  }, [id, deviceState?.id, deviceState?.expectedNonce, isBooting, keys, watchdogMetrics.stalls]);
+  }, [id, deviceState?.id, deviceState?.expectedNonce, isBooting, keys, watchdogMetrics.stalls, deviceState]);
   // Read-Verify-Repair Integrity Check
   useEffect(() => {
     if (!manifest?.playlist?.items?.[currentIndex]) return;
@@ -156,7 +157,7 @@ export function SimulatorPage() {
         const hashHex = Array.from(new Uint8Array(hashBuffer))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        const isValid = item.integrity === hashHex;
+        const isValid = item.checksum === hashHex;
         if (!isValid) {
           toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
           setResilienceTier('cached');
@@ -168,9 +169,11 @@ export function SimulatorPage() {
       setIntegrityQueue(prev => prev.filter(i => i !== item.id));
     };
     verify();
+    const playlistLength = manifest.playlist.items.length;
+    const nextDuration = Math.max(1000, item.durationMs || 5000);
     const timer = setTimeout(() => {
-      setCurrentIndex(prev => (prev + 1) % manifest.playlist.items.length);
-    }, Math.max(1000, item.durationMs || 5000));
+      setCurrentIndex(prev => (prev + 1) % playlistLength);
+    }, nextDuration);
     return () => clearTimeout(timer);
   }, [manifest, currentIndex]);
   if (isBooting) return (

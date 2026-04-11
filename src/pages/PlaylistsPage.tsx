@@ -125,7 +125,7 @@ export function PlaylistsPage() {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || !editingPlaylist || !active.id) return;
+    if (!over || !editingPlaylist || !active.id || typeof active.id !== 'string') return;
     if (active.id !== over.id) {
       const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
       const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);
@@ -144,10 +144,10 @@ export function PlaylistsPage() {
               <Button variant="ghost" size="icon" onClick={() => setEditingPlaylist(null)} className="rounded-full"><ArrowLeft className="h-4 w-4" /></Button>
               <div>
                 <h1 className="text-2xl font-bold tracking-tight">{editingPlaylist.name}</h1>
-                <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-2" role="status" aria-live="polite">
                   <Badge variant="outline" className="text-[10px] font-mono">REVISION_{editingPlaylist.version}</Badge>
                   Orchestrating High-Integrity Manifest
-                </p>
+                </div>
               </div>
             </div>
             <div className="flex gap-2">

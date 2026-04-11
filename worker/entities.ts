@@ -134,7 +134,7 @@ export class DeviceEntity extends IndexedEntity<Device> {
     let escalationLevel: Device['telemetry']['escalationLevel'] = 'none';
     if (errorCount > 0) escalationLevel = 'watchdog_recovery';
     if (errorCount > 3) escalationLevel = 'cache_fallback';
-    if (errorCount > 10 || (data.telemetry?.cpuUsage ?? 0) > 90) escalationLevel = 'emergency';
+    if (errorCount > 10 || (data.cpuUsage ?? 0) > 90) escalationLevel = 'emergency';
 
     // Traffic Shaping: Jittered Sync Intervals
     let nextInterval = 60000 + (Math.random() * 30000 - 15000); // 60s +/- 15s
@@ -147,19 +147,21 @@ export class DeviceEntity extends IndexedEntity<Device> {
       const history = s.metricsHistory || { cpu: [], mem: [], timestamps: [] };
       return {
         ...s,
-        status: data.status || s.status,
-        platform: data.platform || s.platform,
         appVersion: data.appVersion || s.appVersion,
         telemetry: {
-          ...(data.telemetry || {}),
+          cpuUsage: data.cpuUsage ?? 0,
+          memUsage: data.memUsage ?? 0,
+          diskUsage: data.storageUsedBytes ? Math.round((data.storageUsedBytes / data.storageTotalBytes) * 100) : 0,
+          uptimeSeconds: data.uptimeSeconds ?? 0,
+          playbackErrors: data.playbackErrors ?? [],
           escalationLevel
         },
         expectedNonce: nextNonce,
         nextSyncInterval: nextInterval,
         lastHeartbeatAt: now,
         metricsHistory: {
-          cpu: [...(history.cpu || []), data.telemetry?.cpuUsage ?? 0].slice(-20),
-          mem: [...(history.mem || []), data.telemetry?.memUsage ?? 0].slice(-20),
+        cpu: [...(history.cpu || []), (data.cpuUsage ?? 0)].slice(-20),
+        mem: [...(history.mem || []), (data.memUsage ?? 0)].slice(-20),
           timestamps: [...(history.timestamps || []), now].slice(-20)
         }
       };

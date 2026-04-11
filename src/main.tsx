@@ -46,6 +46,20 @@ const router = createBrowserRouter([
     errorElement: <RouteErrorBoundary />,
   },
   {
+    path: "/docs",
+    element: <DocsPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "/provision",
+    element: <ProvisionPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: "*",
+    element: <NotFoundPage />,
+  },
+  {
     path: "/simulator/:id",
     element: <SimulatorPage />,
     errorElement: <RouteErrorBoundary />,

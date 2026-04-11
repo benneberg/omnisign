@@ -3,7 +3,6 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Code } from '@/components/ui/code';
 import { CheckCircle2, Monitor, Key, QrCode, PlayCircle, ShieldCheck, Zap, DownloadCloud } from 'lucide-react';
 import { motion } from 'framer-motion';
 const PROVISION_STEPS = [

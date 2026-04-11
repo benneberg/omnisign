@@ -79,6 +79,23 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     return ok(c, { accessToken: newAccessToken });
   });
 
+  app.post('/api/v1/playlists', async (c) => {
+    const { name } = await c.req.json<{ name: string }>();
+    if (!isStr(name) || name.trim().length === 0) {
+      return bad(c, 'name required');
+    }
+    const id = crypto.randomUUID();
+    const newPlaylist = {
+      id,
+      name: name.trim(),
+      items: [],
+      version: 1,
+      updatedAt: Date.now()
+    };
+    await PlaylistEntity.create(c.env, newPlaylist);
+    return ok(c, newPlaylist);
+  });
+
   app.post('/api/v1/playlists/:id/publish', async (c) => {
     const { items } = await c.req.json<{ items: any[] }>();
     const pl = new PlaylistEntity(c.env, c.req.param('id'));
