@@ -23,9 +23,11 @@ export interface Device {
   pairingCode?: string;
   pairingExpiresAt: number;
   publicKey?: string;
+  challenge?: string; // Cryptographic nonce for pairing
   accessToken?: string;
   refreshToken?: string;
   logs: AuditLog[];
+  otaManifest?: Manifest; // Staged OTA firmware update
   metricsHistory: {
     cpu: number[];
     mem: number[];
@@ -39,6 +41,8 @@ export interface Device {
     playbackErrors: string[];
     otaVersion?: string;
     otaStatus?: 'idle' | 'downloading' | 'verifying' | 'applying';
+    cpuCores?: number;
+    memoryLimit?: number;
   };
 }
 export type PlaylistItemType = 'image' | 'video' | 'html' | 'url';
@@ -48,7 +52,7 @@ export interface PlaylistItem {
   type: PlaylistItemType;
   url: string;
   htmlContent?: string;
-  checksum: string;
+  integrity: string; // Real SHA256 hash
   durationMs: number;
   transition?: TransitionType;
 }
@@ -61,7 +65,8 @@ export interface Playlist {
 }
 export interface Manifest {
   playlist: Playlist;
-  signature: string;
+  signature: string; // Ed25519 signature of the playlist JSON
+  signerPublicKey: string; // Root or Org public key
   etag: string;
   issuedAt: number;
 }
@@ -69,6 +74,7 @@ export interface DeviceInitResponse {
   deviceId: string;
   pairingCode: string;
   pairingExpiresAt: number;
+  challenge: string;
 }
 export interface AuthTokenResponse {
   accessToken: string;
@@ -79,7 +85,8 @@ export interface DeviceHeartbeat {
   platform: string;
   appVersion: string;
   telemetry: Device['telemetry'];
-  challengeResponse?: string;
+  nonce?: string; // Random string to sign
+  signature?: string; // Ed25519 signature of the heartbeat payload
 }
 export interface User {
   id: string;

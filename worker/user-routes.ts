@@ -17,23 +17,24 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
   });
   app.post('/v1/devices/init', async (c) => {
     const { platform, appVersion, publicKey } = await c.req.json<{ platform: string, appVersion: string, publicKey?: string }>();
-    const id = crypto.randomUUID();
+    const id = c.req.query('id') || crypto.randomUUID();
     await DeviceEntity.create(c.env, {
       ...DeviceEntity.initialState,
       id,
       name: `Node ${id.slice(0, 4)}`,
       platform: platform || 'unknown',
-      appVersion: appVersion || '0.0.0'
+      appVersion: appVersion || '0.0.0',
+      publicKey
     });
     const ent = new DeviceEntity(c.env, id);
-    const { code, expiresAt } = await ent.generatePairingCode(publicKey);
-    return ok(c, { deviceId: id, pairingCode: code, pairingExpiresAt: expiresAt });
+    const { code, expiresAt, challenge } = await ent.generatePairingCode(publicKey);
+    return ok(c, { deviceId: id, pairingCode: code, pairingExpiresAt: expiresAt, challenge });
   });
   app.post('/v1/devices/:id/pair', async (c) => {
-    const { code } = await c.req.json<{ code: string }>();
+    const { code, signature } = await c.req.json<{ code: string, signature?: string }>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
-    const success = await dev.verifyPairing(code);
+    const success = await dev.verifyPairing(code, signature);
     if (!success) return bad(c, 'Invalid or expired pairing code');
     return ok(c, await dev.getState());
   });
@@ -41,24 +42,12 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const body = await c.req.json<DeviceHeartbeat>();
     const dev = new DeviceEntity(c.env, c.req.param('id'));
     if (!await dev.exists()) return notFound(c);
-    const state = await dev.heartbeat(body);
-    return ok(c, state);
-  });
-  app.post('/v1/devices/:id/token/refresh', async (c) => {
-    const dev = new DeviceEntity(c.env, c.req.param('id'));
-    if (!await dev.exists()) return notFound(c);
-    const tokens = await dev.refreshToken();
-    return ok(c, tokens);
-  });
-  app.post('/v1/devices/bulk/assign', async (c) => {
-    const { deviceIds, playlistId } = await c.req.json<{ deviceIds: string[], playlistId: string }>();
-    if (!Array.isArray(deviceIds) || !isStr(playlistId)) return bad(c, 'Invalid request');
-    const results = await Promise.all(deviceIds.map(async id => {
-      const dev = new DeviceEntity(c.env, id);
-      if (await dev.exists()) return dev.assignPlaylist(playlistId);
-      return null;
-    }));
-    return ok(c, { count: results.filter(Boolean).length });
+    try {
+      const state = await dev.heartbeat(body);
+      return ok(c, state);
+    } catch (e) {
+      return bad(c, (e as Error).message);
+    }
   });
   app.get('/v1/devices/:id/playlist', async (c) => {
     const dev = new DeviceEntity(c.env, c.req.param('id'));
@@ -68,8 +57,8 @@ export function userRoutes(app: Hono<{ Bindings: Env }>) {
     const pl = new PlaylistEntity(c.env, state.assignedPlaylistId);
     if (!await pl.exists()) return notFound(c);
     const manifest = await pl.getSignedManifest();
-    c.header('ETag', manifest.etag);
-    c.header('X-Next-Sync', '30');
+    c.header('X-Content-Signature', manifest.signature);
+    c.header('X-Signer-Key', manifest.signerPublicKey);
     return ok(c, manifest);
   });
   app.get('/v1/playlists', async (c) => {
