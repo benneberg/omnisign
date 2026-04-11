@@ -40,6 +40,22 @@ export interface DeviceHeartbeat {
 }
 // Keep existing User/Chat types for compatibility if needed, 
 // though we are shifting focus to OmniSign.
+export interface Chat {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  chatId: string;
+  userId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+}
+
 export interface User {
   id: string;
   name: string;

@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { Chat, ChatMessage, User } from '@shared/types'
 import { api } from '@/lib/api-client'
 
-export const HAS_TEMPLATE_DEMO = true
+
 
 const glassCard = 'backdrop-blur-xl bg-white/10 dark:bg-black/20 border-white/20 shadow-2xl'
 
@@ -84,7 +84,7 @@ export function TemplateDemo() {
 
     const created = await api<ChatMessage>(`/api/chats/${selectedChatId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ userId: selectedUserId, text: msg }),
+      body: JSON.stringify({ userId: selectedUserId, content: msg }),
     })
 
     setMessages((prev) => [...prev, created])
@@ -191,9 +191,9 @@ export function TemplateDemo() {
                     <span className="font-medium">
                       {usersById.get(m.userId)?.name ?? 'Unknown'}:
                     </span>{' '}
-                    <span>{m.text}</span>
+                    <span>{m.content}</span>
                     <span className="ml-2 text-xs text-muted-foreground">
-                      {new Date(m.ts).toLocaleTimeString()}
+                      {new Date(m.createdAt).toLocaleTimeString()}
                     </span>
                   </div>
                 ))}

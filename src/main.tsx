@@ -40,6 +40,11 @@ const router = createBrowserRouter([
     errorElement: <RouteErrorBoundary />,
   },
   {
+    path: "/settings",
+    element: <SettingsPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
     path: "/simulator/:id",
     element: <SimulatorPage />,
     errorElement: <RouteErrorBoundary />,
@@ -54,3 +59,4 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
+import { SettingsPage } from '@/pages/SettingsPage'
