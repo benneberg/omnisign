@@ -55,7 +55,7 @@ export interface PlaylistItem {
   type: PlaylistItemType;
   url: string;
   htmlContent?: string;
-  integrity: string; 
+  integrity: string;
   durationMs: number;
   transition?: TransitionType;
 }
@@ -68,8 +68,8 @@ export interface Playlist {
 }
 export interface Manifest {
   playlist: Playlist;
-  signature: string; 
-  signerPublicKey: string; 
+  signature: string;
+  signerPublicKey: string;
   etag: string;
   issuedAt: number;
   otaSignature?: string;
@@ -89,10 +89,16 @@ export interface DeviceHeartbeat {
   status: DeviceStatus;
   platform: string;
   appVersion: string;
-  telemetry: Device['telemetry'];
-  nonce?: string; 
-  challenge?: string; // The signed nonce returned to server
-  signature?: string; 
+  telemetry?: Device['telemetry'];
+  cpuUsage?: number;
+  memUsage?: number;
+  storageUsedBytes?: number;
+  storageTotalBytes?: number;
+  uptimeSeconds?: number;
+  playbackErrors?: string[];
+  nonce?: string;
+  challenge?: string; 
+  signature?: string; // Final cryptographic signature field
 }
 export interface User {
   id: string;

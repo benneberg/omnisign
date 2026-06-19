@@ -157,7 +157,7 @@ export function SimulatorPage() {
         const hashHex = Array.from(new Uint8Array(hashBuffer))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        const isValid = item.checksum === hashHex;
+        const isValid = item.integrity === hashHex;
         if (!isValid) {
           toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
           setResilienceTier('cached');

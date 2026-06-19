@@ -102,17 +102,15 @@ export class DeviceEntity extends IndexedEntity<Device> {
     await this.addLog(`System Escalation: ${level}`, level === 'emergency' ? 'error' : 'warn');
   }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
-    const now = Date.now();
-    const state = await this.getState();
-    
+    const now = Date.now();    const state = await this.getState();
     // Verify Anti-Spoof Signature if Active
-    if (state.status === 'active' && data.signedNonce && state.publicKey && state.expectedNonce) {
+    if (state.status === 'active' && data.signature && state.publicKey && state.expectedNonce) {
       try {
         const pubBytes = this.base64ToBytes(state.publicKey);
         const key = await crypto.subtle.importKey('spki', pubBytes, { name: 'Ed25519' }, false, ['verify']);
         const message = state.expectedNonce;
         const msgBytes = new TextEncoder().encode(message);
-        const sigBytes = this.base64ToBytes(data.signedNonce);
+        const sigBytes = this.base64ToBytes(data.signature);
         const valid = await crypto.subtle.verify('Ed25519', key, sigBytes, msgBytes);
         if (!valid) {
           await this.addLog("Heartbeat rejected: Invalid signature", "error");
@@ -122,7 +120,7 @@ export class DeviceEntity extends IndexedEntity<Device> {
         await this.addLog(`Heartbeat signature verification failed: ${e}`, "error");
         throw new Error("Signature verification failed");
       }
-    } else if (state.status === 'active' && !data.signedNonce) {
+    } else if (state.status === 'active' && !data.signature) {
       await this.addLog("Heartbeat rejected: No signature provided", "error");
       throw new Error("Missing cryptographic signature");
     }
