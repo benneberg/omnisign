@@ -21,11 +21,20 @@ export function getNonce(deviceId: string): string | null {
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const isSystemPath = path.includes('/api/health') || path.includes('/api/client-errors');
-  const finalPath = isSystemPath ? path : (path.startsWith('/v1/') ? '/api' + path : path.replace('/api/', '/api/v1/'));
+  let finalPath = path;
+  if (!isSystemPath) {
+    if (path.startsWith('/v1/')) {
+      finalPath = '/api' + path;
+    } else if (path.startsWith('/api/v1/')) {
+      finalPath = path;
+    } else {
+      finalPath = '/api/v1' + (path.startsWith('/') ? path : '/' + path);
+    }
+  }
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
   const deviceMatch = finalPath.match(/\/api\/v1\/devices\/([^/?#\s]+)/);
-  const isRefreshEndpoint = finalPath.includes('/token/refresh') || path.includes('/token/refresh');
+  const isRefreshEndpoint = finalPath.includes('/token/refresh');
   if (deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
     const deviceId = deviceMatch[1];
     const token = getAuth(deviceId);
@@ -56,7 +65,6 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       console.error("[API] Session recovery critical failure", e);
     }
   }
-  // Improved JSON parsing resilience
   const text = await res.text();
   let json: ApiResponse<T>;
   try {

@@ -4,7 +4,6 @@ import { MOCK_DEVICES, MOCK_PLAYLISTS, ROOT_PUB_KEY } from "@shared/mock-data";
 export class DeviceEntity extends IndexedEntity<Device> {
   static readonly entityName = "device";
   static readonly indexName = "devices";
-
   private base64ToBytes(base64: string): Uint8Array {
     const binaryString = atob(base64);
     const bytes = new Uint8Array(binaryString.length);
@@ -46,14 +45,14 @@ export class DeviceEntity extends IndexedEntity<Device> {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const challenge = crypto.randomUUID();
     const expiresAt = Date.now() + 600000;
-    await this.mutate(s => ({ 
-      ...s, 
-      pairingCode: code, 
-      pairingExpiresAt: expiresAt, 
-      challenge, 
-      expectedNonce: challenge, 
-      status: 'pairing', 
-      publicKey 
+    await this.mutate(s => ({
+      ...s,
+      pairingCode: code,
+      pairingExpiresAt: expiresAt,
+      challenge,
+      expectedNonce: challenge,
+      status: 'pairing',
+      publicKey
     }));
     await this.addLog("Pairing challenge generated", "info", `Challenge: ${challenge}`);
     return { code, expiresAt, challenge };
@@ -124,32 +123,32 @@ export class DeviceEntity extends IndexedEntity<Device> {
       await this.addLog("Heartbeat rejected: No signature provided", "error");
       throw new Error("Missing cryptographic signature");
     }
-
     const nextNonce = crypto.randomUUID();
-    
     // Server-side escalation logic
     const errorCount = data.playbackErrors?.length ?? 0;
     let escalationLevel: Device['telemetry']['escalationLevel'] = 'none';
     if (errorCount > 0) escalationLevel = 'watchdog_recovery';
     if (errorCount > 3) escalationLevel = 'cache_fallback';
     if (errorCount > 10 || (data.cpuUsage ?? 0) > 90) escalationLevel = 'emergency';
-
     // Traffic Shaping: Jittered Sync Intervals
     let nextInterval = 60000 + (Math.random() * 30000 - 15000); // 60s +/- 15s
     if (errorCount > 0 || escalationLevel !== 'none') {
       // Exponential backoff for degraded nodes to prevent thundering herd during recovery
       nextInterval = Math.min(300000, 10000 * Math.pow(2, errorCount));
     }
-
     return this.mutate(s => {
       const history = s.metricsHistory || { cpu: [], mem: [], timestamps: [] };
+      // Fix TS18048: storageTotalBytes possibly undefined
+      const storageUsed = data.storageUsedBytes ?? 0;
+      const storageTotal = data.storageTotalBytes ?? 0;
+      const diskUsage = storageTotal > 0 ? Math.round((storageUsed / storageTotal) * 100) : 0;
       return {
         ...s,
         appVersion: data.appVersion || s.appVersion,
         telemetry: {
           cpuUsage: data.cpuUsage ?? 0,
           memUsage: data.memUsage ?? 0,
-          diskUsage: data.storageUsedBytes ? Math.round((data.storageUsedBytes / data.storageTotalBytes) * 100) : 0,
+          diskUsage,
           uptimeSeconds: data.uptimeSeconds ?? 0,
           playbackErrors: data.playbackErrors ?? [],
           escalationLevel
@@ -158,8 +157,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
         nextSyncInterval: nextInterval,
         lastHeartbeatAt: now,
         metricsHistory: {
-        cpu: [...(history.cpu || []), (data.cpuUsage ?? 0)].slice(-20),
-        mem: [...(history.mem || []), (data.memUsage ?? 0)].slice(-20),
+          cpu: [...(history.cpu || []), (data.cpuUsage ?? 0)].slice(-20),
+          mem: [...(history.mem || []), (data.memUsage ?? 0)].slice(-20),
           timestamps: [...(history.timestamps || []), now].slice(-20)
         }
       };
@@ -169,7 +168,6 @@ export class DeviceEntity extends IndexedEntity<Device> {
 export class PlaylistEntity extends IndexedEntity<Playlist> {
   static readonly entityName = "playlist";
   static readonly indexName = "playlists";
-
   private base64ToBytes(base64: string): Uint8Array {
     const binaryString = atob(base64);
     const bytes = new Uint8Array(binaryString.length);

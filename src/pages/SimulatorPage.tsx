@@ -2,9 +2,9 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, saveAuth } from '@/lib/api-client';
-import { generateDeviceKeypair, exportKey, signData, computeHash } from '@/lib/crypto-utils';
-import type { PlaylistItem, Manifest, Device, DeviceInitResponse } from '@shared/types';
-import { RefreshCw, Key, QrCode, Database, ShieldCheck, AlertTriangle, ShieldAlert, Cpu } from 'lucide-react';
+import { generateDeviceKeypair, exportKey, signData } from '@/lib/crypto-utils';
+import type { Manifest, Device, DeviceInitResponse } from '@shared/types';
+import { RefreshCw, Key, QrCode, ShieldCheck, ShieldAlert, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +22,15 @@ export function SimulatorPage() {
   const [integrityQueue, setIntegrityQueue] = useState<string[]>([]);
   const rafRef = useRef<number>(0);
   const lastRafTime = useRef<number>(performance.now());
-  const lastFrameIdentity = useRef<string>("");
-  const frameStabilityCounter = useRef<number>(0);
+  const deviceStateRef = useRef<Device | null>(null);
+  const keysRef = useRef<{ pub: string, priv: CryptoKey } | null>(null);
+  // Synchronize refs for heartbeat without re-triggering effects
+  useEffect(() => {
+    deviceStateRef.current = deviceState;
+  }, [deviceState]);
+  useEffect(() => {
+    keysRef.current = keys;
+  }, [keys]);
   const getStored = async (key: string) => {
     return new Promise((resolve) => {
       const req = indexedDB.open(DB_NAME, 1);
@@ -89,7 +96,7 @@ export function SimulatorPage() {
     boot();
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [id, startWatchdog]);
-  const { data: manifest, refetch: forceSync } = useQuery({
+  const { data: manifest } = useQuery({
     queryKey: ['simulator-playlist', id],
     queryFn: async () => {
       try {
@@ -111,70 +118,83 @@ export function SimulatorPage() {
     enabled: deviceState?.status === 'active',
     refetchInterval: (deviceState?.nextSyncInterval ?? 60000) as number,
   });
-  // Anti-Spoof Heartbeat Loop
+  // Anti-Spoof Heartbeat Loop (Recursive timeout for traffic shaping)
   useEffect(() => {
-    if (isBooting || !keys || !deviceState) return;
-    const currentDeviceState = deviceState; // Snapshot to prevent stale closure
-    const hb = setInterval(async () => {
-      try {
-        const heartbeatPayload = {
-          status: currentDeviceState.status,
-          platform: 'ScreenMesh-OS',
-          appVersion: '3.1.0-STABLE',
-          telemetry: {
-            ...(currentDeviceState.telemetry || {}),
-            uptimeSeconds: Math.floor(performance.now() / 1000),
-            playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
-          }
-        };
-        const heartbeatPayloadWithSig = currentDeviceState.expectedNonce
-          ? { ...heartbeatPayload, signature: await signData(keys.priv, currentDeviceState.expectedNonce) }
-          : heartbeatPayload;
-
-        const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
-          method: 'POST',
-          body: JSON.stringify(heartbeatPayloadWithSig)
-        });
-        if (updated.accessToken) saveAuth(id!, updated.accessToken);
-        setDeviceState(updated);
-      } catch (e) {
-        console.warn("[Watchdog] Heartbeat handshake failed", e);
+    if (isBooting) return;
+    let timerId: ReturnType<typeof setTimeout>;
+    const performHeartbeat = async () => {
+      const state = deviceStateRef.current;
+      const k = keysRef.current;
+      if (state && state.status === 'active' && k) {
+        try {
+          const heartbeatPayload = {
+            status: state.status,
+            platform: 'ScreenMesh-OS',
+            appVersion: '3.1.0-STABLE',
+            telemetry: {
+              ...(state.telemetry || {}),
+              uptimeSeconds: Math.floor(performance.now() / 1000),
+              playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
+            }
+          };
+          const signature = state.expectedNonce 
+            ? await signData(k.priv, state.expectedNonce) 
+            : undefined;
+          const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
+            method: 'POST',
+            body: JSON.stringify({ ...heartbeatPayload, signature })
+          });
+          if (updated.accessToken) saveAuth(id!, updated.accessToken);
+          setDeviceState(updated);
+        } catch (e) {
+          console.warn("[Watchdog] Heartbeat handshake failed", e);
+        }
       }
-    }, 15000);
-    return () => clearInterval(hb);
-  }, [id, deviceState?.id, deviceState?.expectedNonce, isBooting, keys, watchdogMetrics.stalls, deviceState]);
+      const nextInterval = deviceStateRef.current?.nextSyncInterval ?? 15000;
+      timerId = setTimeout(performHeartbeat, nextInterval);
+    };
+    timerId = setTimeout(performHeartbeat, 15000);
+    return () => clearTimeout(timerId);
+  }, [id, isBooting, watchdogMetrics.stalls]);
   // Read-Verify-Repair Integrity Check
   useEffect(() => {
     if (!manifest?.playlist?.items?.[currentIndex]) return;
+    let ignore = false;
     const item = manifest.playlist.items[currentIndex];
     const verify = async () => {
       setIntegrityQueue(prev => [...prev, item.id]);
       try {
         const response = await fetch(item.url);
+        if (ignore) return;
         if (!response.ok) throw new Error('Fetch failed');
         const buffer = await response.arrayBuffer();
         const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
         const hashHex = Array.from(new Uint8Array(hashBuffer))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        const isValid = item.integrity === hashHex;
-        if (!isValid) {
+        if (item.integrity !== hashHex) {
           toast.error("INTEGRITY FAILURE: SHA256 MISMATCH", { description: "Repairing content segment..." });
           setResilienceTier('cached');
         }
       } catch (e) {
-        toast.error("INTEGRITY FAILURE: FETCH/VERIFY ERROR", { description: "Content unavailable - triggering fallback." });
-        setResilienceTier('cached');
+        if (!ignore) {
+          toast.error("INTEGRITY FAILURE: FETCH/VERIFY ERROR", { description: "Content unavailable - triggering fallback." });
+          setResilienceTier('cached');
+        }
+      } finally {
+        if (!ignore) setIntegrityQueue(prev => prev.filter(i => i !== item.id));
       }
-      setIntegrityQueue(prev => prev.filter(i => i !== item.id));
     };
     verify();
     const playlistLength = manifest.playlist.items.length;
     const nextDuration = Math.max(1000, item.durationMs || 5000);
     const timer = setTimeout(() => {
-      setCurrentIndex(prev => (prev + 1) % playlistLength);
+      if (!ignore) setCurrentIndex(prev => (prev + 1) % playlistLength);
     }, nextDuration);
-    return () => clearTimeout(timer);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
   }, [manifest, currentIndex]);
   if (isBooting) return (
     <div className="w-screen h-screen bg-black flex flex-col items-center justify-center text-white font-mono gap-4 uppercase tracking-[0.3em]">
@@ -239,7 +259,7 @@ export function SimulatorPage() {
             {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" />}
             {activeItem.type === 'video' && <video src={activeItem.url} autoPlay muted loop className="w-full h-full object-cover" />}
             {activeItem.type === 'html' && (
-              <iframe 
+              <iframe
                 srcDoc={activeItem.htmlContent || '<p>Empty</p>'}
                 sandbox="allow-scripts allow-same-origin allow-popups"
                 className="w-full h-full border-0"
