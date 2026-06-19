@@ -19,7 +19,7 @@ export function getNonce(deviceId: string): string | null {
   const current = JSON.parse(localStorage.getItem(NONCE_KEY) || '{}');
   return current[deviceId] || null;
 }
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const isSystemPath = path.includes('/api/health') || path.includes('/api/client-errors');
   let finalPath = path;
   if (!isSystemPath) {
@@ -43,14 +43,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   const res = await fetch(finalPath, { ...init, headers });
-  // Anti-Spoof Nonce Tracking from Headers
   if (deviceMatch && deviceMatch[1]) {
     const deviceId = deviceMatch[1];
     const nextChallenge = res.headers.get('X-Next-Challenge');
     if (nextChallenge) saveNonce(deviceId, nextChallenge);
   }
-  // Handle 401 with a single retry attempt for token refresh
-  if (res.status === 401 && deviceMatch && deviceMatch[1] && !isRefreshEndpoint) {
+  // Handle 401 with hardening: avoid recursive loops and use standardized pathing
+  if (res.status === 401 && deviceMatch && deviceMatch[1] && !isRefreshEndpoint && !retried) {
     const deviceId = deviceMatch[1];
     try {
       const refreshRes = await fetch(`/api/v1/devices/${deviceId}/token/refresh`, { method: 'POST' });
@@ -58,11 +57,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         const refreshData = await refreshRes.json() as ApiResponse<{accessToken: string}>;
         if (refreshData.success && refreshData.data) {
           saveAuth(deviceId, refreshData.data.accessToken);
-          return api<T>(path, init);
+          return api<T>(path, init, true); // Mark as retried
         }
       }
     } catch (e) {
-      console.error("[API] Session recovery critical failure", e);
+      console.error("[API] Session recovery failure:", e);
     }
   }
   const text = await res.text();

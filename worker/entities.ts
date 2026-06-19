@@ -1,6 +1,6 @@
 import { IndexedEntity } from "./core-utils";
-import type { Device, Playlist, DeviceHeartbeat, Manifest, AuditLog, AuthTokenResponse } from "@shared/types";
-import { MOCK_DEVICES, MOCK_PLAYLISTS, ROOT_PUB_KEY } from "@shared/mock-data";
+import type { Device, Playlist, DeviceHeartbeat, Manifest, AuditLog } from "@shared/types";
+import { MOCK_DEVICES, MOCK_PLAYLISTS } from "@shared/mock-data";
 export class DeviceEntity extends IndexedEntity<Device> {
   static readonly entityName = "device";
   static readonly indexName = "devices";
@@ -36,9 +36,10 @@ export class DeviceEntity extends IndexedEntity<Device> {
   };
   static seedData = MOCK_DEVICES;
   async addLog(event: string, level: AuditLog['level'], details?: string): Promise<void> {
+    const sanitizedDetails = details ? details.slice(0, 200) : undefined;
     await this.mutate(s => ({
       ...s,
-      logs: [{ id: crypto.randomUUID(), timestamp: Date.now(), event, level, details }, ...(s.logs || [])].slice(0, 50)
+      logs: [{ id: crypto.randomUUID(), timestamp: Date.now(), event, level, details: sanitizedDetails }, ...(s.logs || [])].slice(0, 50)
     }));
   }
   async generatePairingCode(publicKey?: string): Promise<{ code: string; expiresAt: number; challenge: string }> {
@@ -101,8 +102,8 @@ export class DeviceEntity extends IndexedEntity<Device> {
     await this.addLog(`System Escalation: ${level}`, level === 'emergency' ? 'error' : 'warn');
   }
   async heartbeat(data: DeviceHeartbeat): Promise<Device> {
-    const now = Date.now();    const state = await this.getState();
-    // Verify Anti-Spoof Signature if Active
+    const now = Date.now();
+    const state = await this.getState();
     if (state.status === 'active' && data.signature && state.publicKey && state.expectedNonce) {
       try {
         const pubBytes = this.base64ToBytes(state.publicKey);
@@ -124,33 +125,30 @@ export class DeviceEntity extends IndexedEntity<Device> {
       throw new Error("Missing cryptographic signature");
     }
     const nextNonce = crypto.randomUUID();
-    // Server-side escalation logic
     const errorCount = data.playbackErrors?.length ?? 0;
     let escalationLevel: Device['telemetry']['escalationLevel'] = 'none';
     if (errorCount > 0) escalationLevel = 'watchdog_recovery';
     if (errorCount > 3) escalationLevel = 'cache_fallback';
     if (errorCount > 10 || (data.cpuUsage ?? 0) > 90) escalationLevel = 'emergency';
-    // Traffic Shaping: Jittered Sync Intervals
-    let nextInterval = 60000 + (Math.random() * 30000 - 15000); // 60s +/- 15s
+    let nextInterval = 60000 + (Math.random() * 30000 - 15000);
     if (errorCount > 0 || escalationLevel !== 'none') {
-      // Exponential backoff for degraded nodes to prevent thundering herd during recovery
       nextInterval = Math.min(300000, 10000 * Math.pow(2, errorCount));
     }
     return this.mutate(s => {
       const history = s.metricsHistory || { cpu: [], mem: [], timestamps: [] };
-      // Fix TS18048: storageTotalBytes possibly undefined
-      const storageUsed = data.storageUsedBytes ?? 0;
-      const storageTotal = data.storageTotalBytes ?? 0;
+      const storageUsed = Math.max(0, data.storageUsedBytes ?? 0);
+      const storageTotal = Math.max(0, data.storageTotalBytes ?? 0);
       const diskUsage = storageTotal > 0 ? Math.round((storageUsed / storageTotal) * 100) : 0;
+      const sanitizedErrors = (data.playbackErrors ?? []).map(e => e.slice(0, 100));
       return {
         ...s,
         appVersion: data.appVersion || s.appVersion,
         telemetry: {
-          cpuUsage: data.cpuUsage ?? 0,
-          memUsage: data.memUsage ?? 0,
-          diskUsage,
-          uptimeSeconds: data.uptimeSeconds ?? 0,
-          playbackErrors: data.playbackErrors ?? [],
+          cpuUsage: Math.max(0, Math.min(100, data.cpuUsage ?? 0)),
+          memUsage: Math.max(0, Math.min(100, data.memUsage ?? 0)),
+          diskUsage: Math.max(0, Math.min(100, diskUsage)),
+          uptimeSeconds: Math.max(0, data.uptimeSeconds ?? 0),
+          playbackErrors: sanitizedErrors,
           escalationLevel
         },
         expectedNonce: nextNonce,
@@ -195,13 +193,13 @@ export class PlaylistEntity extends IndexedEntity<Playlist> {
   async getSignedManifest(): Promise<Manifest> {
     const playlist = await this.getState();
     try {
-      const ROOT_PRIVKEY_SEED_B64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='; // 32 zero bytes
+      const ROOT_PRIVKEY_SEED_B64 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
       const seedBytes = this.base64ToBytes(ROOT_PRIVKEY_SEED_B64);
       const rootPrivKey = await crypto.subtle.importKey('raw', seedBytes, { name: 'Ed25519' }, false, ['sign']);
       const playlistJson = JSON.stringify(playlist);
       const sigBytes = await crypto.subtle.sign('Ed25519', rootPrivKey, new TextEncoder().encode(playlistJson));
       const signature = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
-      const signerPublicKey = '1XasgGChtKrXm/TziWQncqDufLPi8qry8ASgfdwdR=='; // pub raw base64 for this seed
+      const signerPublicKey = '1XasgGChtKrXm/TziWQncqDufLPi8qry8ASgfdwdR==';
       return {
         playlist,
         signature,

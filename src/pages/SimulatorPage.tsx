@@ -24,7 +24,6 @@ export function SimulatorPage() {
   const lastRafTime = useRef<number>(performance.now());
   const deviceStateRef = useRef<Device | null>(null);
   const keysRef = useRef<{ pub: string, priv: CryptoKey } | null>(null);
-  // Synchronize refs for heartbeat without re-triggering effects
   useEffect(() => {
     deviceStateRef.current = deviceState;
   }, [deviceState]);
@@ -51,12 +50,11 @@ export function SimulatorPage() {
       tx.objectStore(STORE_NAME).put(val, key);
     };
   };
-  // High-Fidelity Watchdog Monitoring
   const startWatchdog = useCallback(() => {
     const monitor = (time: number) => {
       const drift = time - lastRafTime.current;
       setWatchdogMetrics(prev => ({ ...prev, rafDrift: drift, frameCount: prev.frameCount + 1 }));
-      if (drift > 5000) { // 5s Stall
+      if (drift > 5000) {
         setWatchdogMetrics(prev => ({ ...prev, stalls: prev.stalls + 1 }));
         toast.error("WATCHDOG: RAF ENGINE STALL DETECTED", { description: "Initiating hot-reload recovery." });
         window.location.reload();
@@ -118,7 +116,6 @@ export function SimulatorPage() {
     enabled: deviceState?.status === 'active',
     refetchInterval: (deviceState?.nextSyncInterval ?? 60000) as number,
   });
-  // Anti-Spoof Heartbeat Loop (Recursive timeout for traffic shaping)
   useEffect(() => {
     if (isBooting) return;
     let timerId: ReturnType<typeof setTimeout>;
@@ -137,8 +134,8 @@ export function SimulatorPage() {
               playbackErrors: watchdogMetrics.stalls > 0 ? ["Watchdog Triggered"] : []
             }
           };
-          const signature = state.expectedNonce 
-            ? await signData(k.priv, state.expectedNonce) 
+          const signature = state.expectedNonce
+            ? await signData(k.priv, state.expectedNonce)
             : undefined;
           const updated = await api<Device>(`/v1/devices/${id}/heartbeat`, {
             method: 'POST',
@@ -153,10 +150,10 @@ export function SimulatorPage() {
       const nextInterval = deviceStateRef.current?.nextSyncInterval ?? 15000;
       timerId = setTimeout(performHeartbeat, nextInterval);
     };
-    timerId = setTimeout(performHeartbeat, 15000);
+    // Refined: Initial sync occurs immediately (1s) after boot to ensure Control Plane readiness feedback
+    timerId = setTimeout(performHeartbeat, 1000);
     return () => clearTimeout(timerId);
   }, [id, isBooting, watchdogMetrics.stalls]);
-  // Read-Verify-Repair Integrity Check
   useEffect(() => {
     if (!manifest?.playlist?.items?.[currentIndex]) return;
     let ignore = false;
@@ -256,7 +253,7 @@ export function SimulatorPage() {
       <AnimatePresence mode="wait">
         {activeItem && (
           <motion.div key={activeItem.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
-            {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" />}
+            {activeItem.type === 'image' && <img src={activeItem.url} className="w-full h-full object-cover" alt="" />}
             {activeItem.type === 'video' && <video src={activeItem.url} autoPlay muted loop className="w-full h-full object-cover" />}
             {activeItem.type === 'html' && (
               <iframe

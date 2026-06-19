@@ -19,8 +19,8 @@ import { toast } from 'sonner';
 function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemove: () => void, onChange: (updates: Partial<PlaylistItem>) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const [isHashing, setIsHashing] = useState(false);
-  const style = { 
-    transform: CSS.Transform.toString(transform), 
+  const style = {
+    transform: CSS.Transform.toString(transform),
     transition,
     zIndex: isDragging ? 10 : 1,
     opacity: isDragging ? 0.6 : 1
@@ -29,9 +29,9 @@ function SortableItem({ item, onRemove, onChange }: { item: PlaylistItem, onRemo
     setIsHashing(true);
     try {
       const res = await fetch(item.url);
-      if(!res.ok) { 
-        toast.error('Cannot fetch for hash'); 
-        return; 
+      if(!res.ok) {
+        toast.error('Cannot fetch for hash');
+        return;
       }
       const buf = await res.arrayBuffer();
       const hashBuf = await crypto.subtle.digest('SHA-256', buf);
@@ -125,17 +125,16 @@ export function PlaylistsPage() {
     },
     onError: (e) => toast.error(e.message)
   });
-
   const newPlaylistMutation = useMutation({
     mutationFn: async (name: string) => api<Playlist>('/v1/playlists', {
-      method: 'POST', 
+      method: 'POST',
       body: JSON.stringify({name})
     }),
-    onSuccess: (data) => { 
-      toast.success('Playlist created'); 
+    onSuccess: (data) => {
+      toast.success('Playlist created');
       queryClient.invalidateQueries({queryKey: ['playlists']});
-      setEditingPlaylist(data); 
-      setNewPlaylistOpen(false); 
+      setEditingPlaylist(data);
+      setNewPlaylistOpen(false);
     },
     onError: (e) => toast.error(e.message || 'Failed')
   });
@@ -146,8 +145,12 @@ export function PlaylistsPage() {
     if (active.id !== over.id) {
       const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
       const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);
+      // Safety check: ensure both indices exist before moving
       if (oldIndex !== -1 && newIndex !== -1) {
-        setEditingPlaylist({ ...editingPlaylist, items: arrayMove(editingPlaylist.items, oldIndex, newIndex) });
+        setEditingPlaylist({ 
+          ...editingPlaylist, 
+          items: arrayMove(editingPlaylist.items, oldIndex, newIndex) 
+        });
       }
     }
   };
@@ -245,19 +248,18 @@ export function PlaylistsPage() {
             </Card>
           ))}
         </div>
-
         <Sheet open={newPlaylistOpen} onOpenChange={setNewPlaylistOpen}>
           <SheetContent>
             <SheetTitle>Create New Playlist</SheetTitle>
             <SheetDescription>Start a new content manifest.</SheetDescription>
-            <Input 
-              className='mt-6' 
-              placeholder="e.g. 'Main Lobby Sequence'" 
-              value={newPlaylistName} 
-              onChange={e=>setNewPlaylistName(e.target.value)} 
+            <Input
+              className='mt-6'
+              placeholder="e.g. 'Main Lobby Sequence'"
+              value={newPlaylistName}
+              onChange={e=>setNewPlaylistName(e.target.value)}
             />
-            <Button 
-              disabled={!newPlaylistName.trim() || newPlaylistMutation.isPending} 
+            <Button
+              disabled={!newPlaylistName.trim() || newPlaylistMutation.isPending}
               onClick={()=>newPlaylistMutation.mutate(newPlaylistName)}
               className='w-full mt-6'
             >
